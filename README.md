@@ -6,20 +6,20 @@ MEMSHADOW enables seamless context preservation and knowledge accumulation acros
 
 ## Table of Contents
 
-*   [**Core Concepts**](./concepts.md): Fundamental ideas, goals, and architecture of Project MEMSHADOW.
-*   [**Project Components**](./components/README.md): Detailed information on each major protocol and subsystem.
-    *   [MEMSHADOW Core](./components/memshadow_core.md): The central memory persistence platform.
-    *   [CHIMERA Protocol](./components/chimera.md): Isolated and weaponized memory protocol for deception.
-    *   [SDAP (Secure Databurst Archival Protocol)](./components/sdap.md): Automated archival of system state.
-    *   [HYDRA Protocol](./components/hydra.md): Phased deployment of internal, automated red team capabilities.
-    *   [MFA/A Framework](./components/mfaa.md): Multi-Factor Authentication & Authorization Framework.
-    *   [JANUS Protocol](./components/janus.md): Portable sealing mechanisms for archival modules.
-    *   [SWARM Project (HYDRA Phase 3)](./components/swarm.md): Autonomous agent swarm for adversarial simulation.
-*   [**Claude Integration**](./claude_integration.md): Specifics of integrating MEMSHADOW with Claude, including code memory and session continuity.
-*   [**Hybrid Local-Cloud Architecture**](./hybrid_architecture.md): Leveraging local NPU/CPU power with VPS capabilities.
-*   [**Roadmap**](./roadmap.md): Detailed step-by-step plan for future features and development.
-*   [**Technology Stack**](./technology_stack.md): Overview of programming languages, databases, and technologies used.
-*   [**Security Overview**](./security.md): Consolidated security information for the MEMSHADOW project.
+*   [**Core Concepts**](./docs/concepts.md): Fundamental ideas, goals, and architecture of Project MEMSHADOW.
+*   [**Project Components**](./docs/components/README.md): Detailed information on each major protocol and subsystem.
+    *   [MEMSHADOW Core](./docs/components/memshadow_core.md): The central memory persistence platform.
+    *   [CHIMERA Protocol](./docs/components/chimera.md): Isolated and weaponized memory protocol for deception.
+    *   [SDAP (Secure Databurst Archival Protocol)](./docs/components/sdap.md): Automated archival of system state.
+    *   [HYDRA Protocol](./docs/components/hydra.md): Phased deployment of internal, automated red team capabilities.
+    *   [MFA/A Framework](./docs/components/mfaa.md): Multi-Factor Authentication & Authorization Framework.
+    *   [JANUS Protocol](./docs/components/janus.md): Portable sealing mechanisms for archival modules.
+    *   [SWARM Project (HYDRA Phase 3)](./docs/components/swarm.md): Autonomous agent swarm for adversarial simulation.
+*   [**Claude Integration**](./docs/claude_integration.md): Specifics of integrating MEMSHADOW with Claude, including code memory and session continuity.
+*   [**Hybrid Local-Cloud Architecture**](./docs/hybrid_architecture.md): Leveraging local NPU/CPU power with VPS capabilities.
+*   [**Roadmap**](./docs/roadmap.md): Detailed step-by-step plan for future features and development.
+*   [**Technology Stack**](./docs/technology_stack.md): Overview of programming languages, databases, and technologies used.
+*   [**Security Overview**](./docs/security.md): Consolidated security information for the MEMSHADOW project.
 
 ## Project Overview
 
