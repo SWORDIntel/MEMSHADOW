@@ -13,6 +13,7 @@ from app.api.middleware import (
     SecurityHeadersMiddleware,
     RateLimitMiddleware
 )
+from app.middleware.step_up_auth import StepUpAuthMiddleware
 
 # Setup structured logging
 setup_logging()
@@ -49,6 +50,7 @@ app = FastAPI(
 # Middleware
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(StepUpAuthMiddleware)
 # app.add_middleware(RateLimitMiddleware) # Rate limiting can be noisy in dev, enable as needed
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(

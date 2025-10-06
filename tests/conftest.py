@@ -41,13 +41,22 @@ from sqlalchemy import text
 
 @pytest.fixture(scope="session", autouse=True)
 async def setup_database():
-    """Set up the test database, creating all tables."""
+    """
+    Set up the test database for the session.
+    Creates all tables before tests run and drops the schema after.
+    """
     async with engine_test.begin() as conn:
+        # Create extensions and tables
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
         await conn.run_sync(Base.metadata.create_all)
+
     yield
+
+    # Teardown: Drop the entire public schema and recreate it for a clean slate.
     async with engine_test.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP SCHEMA public CASCADE;"))
+        await conn.execute(text("CREATE SCHEMA public;"))
 
 async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
     """Override dependency to use the test database session."""

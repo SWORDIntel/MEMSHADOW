@@ -1,4 +1,5 @@
 # Core
+python-dotenv
 fastapi
 pydantic[email]
 pydantic-settings
@@ -18,14 +19,17 @@ greenlet
 redis
 chromadb-client
 pgvector
+psycopg2-binary
 
 # AI/ML
 sentence-transformers
 torch
 numpy
+scikit-learn
 
 # Security
 fido2
+cryptography
 
 # Celery
 celery[redis]

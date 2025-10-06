@@ -1,7 +1,15 @@
+import os
+from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 from pydantic_settings import BaseSettings
 from pydantic import AnyHttpUrl, PostgresDsn, RedisDsn, field_validator
 import secrets
+
+# Explicitly load the .env file from the project root.
+# This ensures that environment variables are available for Alembic and other CLI tools.
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
 
 class Settings(BaseSettings):
     # API Configuration
@@ -58,6 +66,7 @@ class Settings(BaseSettings):
     # Security Configuration
     ALGORITHM: str = "HS256"
     BCRYPT_ROUNDS: int = 12
+    FIELD_ENCRYPTION_KEY: str
 
     # MFA Configuration
     MFA_ISSUER: str = "MEMSHADOW"
