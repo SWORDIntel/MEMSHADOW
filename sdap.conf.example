@@ -1,0 +1,26 @@
+# Sample configuration for SDAP backup script
+# In production, this file should be placed in /etc/memshadow/sdap.conf
+# and have restricted permissions (e.g., 600).
+
+# Database Configuration
+POSTGRES_HOST="localhost"
+POSTGRES_PORT="5432"
+POSTGRES_USER="memshadow"
+POSTGRES_PASSWORD="your_secure_password" # Use a secrets management tool in production
+POSTGRES_DB="memshadow"
+
+# ChromaDB Configuration
+# This should point to the directory where ChromaDB persists its data.
+CHROMA_PERSIST_DIR="/var/lib/chromadb"
+
+# Backup Configuration
+SDAP_BACKUP_PATH="/var/backups/memshadow"
+SDAP_ARCHIVE_SERVER="backup.memshadow.internal" # e.g., an S3 bucket or dedicated backup server
+SDAP_SSH_KEY="/etc/memshadow/keys/sdap_rsa" # SSH key for transfer user
+
+# GPG Encryption Key ID (recipient)
+# Leave blank to disable encryption.
+SDAP_GPG_KEY_ID="MEMSHADOW_BACKUP_2024"
+
+# Application Configuration
+MEMSHADOW_VERSION="1.0.0"

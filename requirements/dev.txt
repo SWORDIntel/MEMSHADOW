@@ -1,0 +1,9 @@
+-r base.txt
+
+# Testing
+pytest
+pytest-asyncio
+httpx
+pytest-cov
+pytest-celery
+pytest-env
