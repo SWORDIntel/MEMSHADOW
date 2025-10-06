@@ -9,7 +9,10 @@ from app.models.memory import Memory
 @pytest.fixture
 def mock_db_session():
     """Fixture for a mocked async database session."""
-    return AsyncMock()
+    session = AsyncMock()
+    # The 'add' method on an AsyncSession is synchronous, so we mock it as such.
+    session.add = MagicMock()
+    return session
 
 @pytest.fixture
 def memory_service_fixture(mock_db_session):
