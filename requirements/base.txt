@@ -1,0 +1,34 @@
+# Core
+fastapi
+pydantic[email]
+pydantic-settings
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+alembic
+python-jose[cryptography]
+passlib[bcrypt]>=1.7.4
+bcrypt==3.2.2
+structlog
+python-multipart
+gunicorn
+greenlet
+
+# Database
+redis
+chromadb-client
+pgvector
+
+# AI/ML
+sentence-transformers
+torch
+numpy
+
+# Security
+fido2
+
+# Celery
+celery[redis]
+
+# Monitoring
+prometheus-fastapi-instrumentator
