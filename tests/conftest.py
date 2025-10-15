@@ -1,3 +1,11 @@
+import sys
+from unittest.mock import MagicMock
+
+# Mock the heavy sentence_transformers library before it's imported by the app.
+# This allows tests to run without needing torch/sentence-transformers installed,
+# as the actual embedding service is mocked in the unit/integration tests anyway.
+sys.modules['sentence_transformers'] = MagicMock()
+
 import asyncio
 from typing import AsyncGenerator, Generator
 
@@ -8,6 +16,7 @@ from sqlalchemy.pool import NullPool
 
 from app.main import app
 from app.db.postgres import Base, get_db
+from app.db import chromadb
 from app.core.config import settings
 from app.workers.celery_app import celery_app as a_celery_app
 
@@ -45,6 +54,9 @@ async def setup_database():
     Set up the test database for the session.
     Creates all tables before tests run and drops the schema after.
     """
+    # Initialize ChromaDB client
+    await chromadb.init_client()
+
     async with engine_test.begin() as conn:
         # Create extensions and tables
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
@@ -57,6 +69,9 @@ async def setup_database():
     async with engine_test.begin() as conn:
         await conn.execute(text("DROP SCHEMA public CASCADE;"))
         await conn.execute(text("CREATE SCHEMA public;"))
+
+    # Close ChromaDB client
+    await chromadb.close_client()
 
 async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
     """Override dependency to use the test database session."""
