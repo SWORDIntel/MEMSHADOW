@@ -43,7 +43,7 @@ async def test_register_duplicate_user_error(async_client: AsyncClient, db_sessi
     response = await async_client.post("/api/v1/auth/register", json=register_data)
 
     # Assert
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert "already exists" in response.json()["detail"]
 
 @pytest.mark.asyncio

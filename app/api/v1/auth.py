@@ -2,6 +2,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 import structlog
 
 from app.api.dependencies import get_db, get_current_active_user
@@ -26,13 +27,18 @@ async def register(
     Register a new user.
     """
     auth_service = AuthService(db)
-    user = await auth_service.get_user_by_email(email=user_in.email)
-    if user:
-        raise HTTPException(
-            status_code=400,
-            detail="The user with this email already exists in the system.",
+    try:
+        user = await auth_service.create_user(
+            email=user_in.email, username=user_in.username, password=user_in.password
         )
-    user = await auth_service.create_user(email=user_in.email, username=user_in.username, password=user_in.password)
+    except IntegrityError:
+        await db.rollback()
+        # This generic message is better as it doesn't reveal which field (email/username) is taken.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email or username already exists.",
+        )
+
     logger.info("User registered", user_id=str(user.id))
     return user
 
