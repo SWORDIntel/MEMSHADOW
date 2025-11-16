@@ -1,0 +1,274 @@
+mission_id: "ts_nation_001"
+mission_name: "Nation-State Cyber Operation"
+description: "Top Secret - Advanced nation-state level cyber operation with strategic objectives"
+classification: "TOP SECRET//SCI//NOFORN"
+
+objective_stages:
+  - stage_id: "strategic_reconnaissance"
+    description: "Multi-source strategic reconnaissance"
+    classification: "TOP SECRET//SCI"
+    tasks:
+      - agent_type: "recon"
+        params:
+          target_cidr: "ts_classified_infrastructure"
+          scan_type: "nation_state_comprehensive"
+          evasion: "maximum"
+          attribution_avoidance: true
+      - agent_type: "wifi"
+        params:
+          task_type: "scan"
+          interface: "wlan0"
+          scan_time: 300
+          show_hidden: true
+          advanced_techniques: ["karma_attack", "rogue_ap"]
+      - agent_type: "bgp"
+        params:
+          mode: "strategic_monitoring"
+          monitor_asns: "adversary_asn_intelligence"
+          detect_hijacks: true
+          route_poisoning_detection: true
+      - agent_type: "blockchain"
+        params:
+          mode: "financial_warfare"
+          chains: ["all_major_chains"]
+          analysis_depth: "nation_state"
+          target_wallets: "adversary_wallet_intelligence"
+          sanctions_evasion_detection: true
+    success_criteria:
+      - "strategic_picture_established"
+      - "attribution_maintained"
+
+  - stage_id: "supply_chain_compromise"
+    description: "Compromise software supply chain"
+    classification: "TOP SECRET//SCI"
+    depends_on: "strategic_reconnaissance"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "supply_chain_analysis"
+          targets_from_blackboard: "software_vendors"
+          scan_depth: "exhaustive"
+          zero_day_discovery: true
+      - agent_type: "authtest"
+        params:
+          mode: "supply_chain_injection"
+          targets: "build_systems"
+          backdoor_implant: true
+    success_criteria:
+      - "supply_chain_compromised"
+      - "backdoor_planted"
+
+  - stage_id: "zero_day_exploitation"
+    description: "Deploy zero-day exploits against critical infrastructure"
+    classification: "TOP SECRET//SCI//TK"
+    depends_on: "strategic_reconnaissance"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "zero_day_deployment"
+          exploits_from_arsenal: "ts_exploit_catalog"
+          targets_from_blackboard: "critical_infrastructure"
+      - agent_type: "authtest"
+        params:
+          mode: "advanced_exploitation"
+          kernel_exploits: true
+          firmware_exploits: true
+    success_criteria:
+      - "critical_systems_compromised"
+
+  - stage_id: "establish_strategic_persistence"
+    description: "Establish long-term strategic persistence"
+    classification: "TOP SECRET//SCI"
+    depends_on: "zero_day_exploitation"
+    tasks:
+      - agent_type: "authtest"
+        params:
+          mode: "strategic_persistence"
+          methods: [
+            "bootkit",
+            "bios_implant",
+            "firmware_backdoor",
+            "hardware_implant_emulation",
+            "supply_chain_persistence"
+          ]
+          redundancy_level: "triple"
+    success_criteria:
+      - "strategic_persistence_established"
+      - "redundant_access_confirmed"
+
+  - stage_id: "credential_intelligence"
+    description: "Comprehensive credential intelligence gathering"
+    classification: "TOP SECRET//SCI"
+    depends_on: "zero_day_exploitation"
+    tasks:
+      - agent_type: "authtest"
+        params:
+          mode: "comprehensive_credential_harvest"
+          targets: ["domain_controllers", "certificate_authorities", "key_management_servers"]
+          methods: ["dcsync", "golden_ticket", "silver_ticket", "skeleton_key"]
+    success_criteria:
+      - "domain_admin_achieved"
+      - "enterprise_admin_achieved"
+
+  - stage_id: "lateral_movement_campaign"
+    description: "Systematic lateral movement across entire network"
+    classification: "TOP SECRET//SCI"
+    depends_on: "credential_intelligence"
+    tasks:
+      - agent_type: "recon"
+        params:
+          mode: "domain_enumeration"
+          techniques: ["bloodhound", "ad_explorer", "ldap_enumeration"]
+      - agent_type: "authtest"
+        params:
+          mode: "automated_lateral_movement"
+          techniques: ["pass_the_hash", "pass_the_ticket", "overpass_the_hash", "rdp_hijacking"]
+    success_criteria:
+      - "network_fully_compromised"
+      - "crown_jewels_accessed"
+
+  - stage_id: "wifi_total_control"
+    description: "Achieve total WiFi infrastructure control"
+    classification: "TOP SECRET//SCI"
+    depends_on: "strategic_reconnaissance"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "advanced_exploitation"
+          techniques: [
+            "wpa3_downgrade",
+            "krack_attack",
+            "dragonblood",
+            "evil_twin_advanced",
+            "deauth_flood"
+          ]
+          capture_all_traffic: true
+          decrypt_enterprise: true
+    success_criteria:
+      - "wifi_infrastructure_controlled"
+      - "traffic_interception_active"
+
+  - stage_id: "web_infrastructure_takeover"
+    description: "Complete web infrastructure compromise"
+    classification: "TOP SECRET//SCI"
+    depends_on: "zero_day_exploitation"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "comprehensive_takeover"
+          url_from_blackboard: "target_web_infrastructure"
+          scan_depth: "nation_state"
+          exploit_chain: true
+          persistent_backdoor: true
+      - agent_type: "crawler"
+        params:
+          mode: "data_exfiltration_prep"
+          extract_databases: true
+          extract_source_code: true
+    success_criteria:
+      - "web_infrastructure_owned"
+      - "backdoor_access_confirmed"
+
+  - stage_id: "bgp_warfare"
+    description: "BGP hijacking and route manipulation"
+    classification: "TOP SECRET//SCI//TK"
+    depends_on: "strategic_reconnaissance"
+    tasks:
+      - agent_type: "bgp"
+        params:
+          mode: "offensive_operations"
+          techniques: ["route_hijacking", "route_leak", "as_path_prepending"]
+          targets_from_blackboard: "adversary_prefixes"
+          mitm_capability: true
+    success_criteria:
+      - "traffic_redirected"
+      - "mitm_position_achieved"
+
+  - stage_id: "blockchain_warfare"
+    description: "Blockchain disruption and financial warfare"
+    classification: "TOP SECRET//SCI//TK"
+    depends_on: "strategic_reconnaissance"
+    tasks:
+      - agent_type: "blockchain"
+        params:
+          mode: "offensive_operations"
+          operations: [
+            "wallet_compromise",
+            "51_percent_attack_simulation",
+            "smart_contract_exploitation",
+            "defi_flash_loan_attack",
+            "exchange_compromise"
+          ]
+          targets_from_blackboard: "adversary_crypto_assets"
+    success_criteria:
+      - "financial_disruption_achieved"
+      - "crypto_assets_compromised"
+
+  - stage_id: "strategic_exfiltration"
+    description: "Exfiltrate strategic intelligence"
+    classification: "TOP SECRET//SCI//TK//ORCON"
+    depends_on: "lateral_movement_campaign"
+    tasks:
+      - agent_type: "recon"
+        params:
+          mode: "strategic_data_exfiltration"
+          data_types: [
+            "classified_documents",
+            "source_code",
+            "databases",
+            "encryption_keys",
+            "research_data",
+            "communication_archives"
+          ]
+          exfil_methods: ["dns_tunneling", "steganography", "tor", "ipv6_covert_channel"]
+    success_criteria:
+      - "strategic_data_exfiltrated"
+      - "exfiltration_undetected"
+
+  - stage_id: "capability_demonstration"
+    description: "Demonstrate capability without attribution"
+    classification: "TOP SECRET//SCI//TK//ORCON"
+    depends_on: "strategic_exfiltration"
+    tasks:
+      - agent_type: "authtest"
+        params:
+          mode: "capability_demonstration"
+          actions: ["data_destruction_dry_run", "system_manipulation", "reversible_disruption"]
+          attribution_false_flags: true
+    success_criteria:
+      - "capability_demonstrated"
+      - "attribution_misdirected"
+
+overall_success_condition: "Strategic objectives achieved with full attribution management and operational security maintained"
+classification_footer: "TOP SECRET//SCI//TK//ORCON//NOFORN"
+handling_instructions: |
+  TOP SECRET - SENSITIVE COMPARTMENTED INFORMATION
+  - Handle via TS//SCI channels only
+  - No foreign nationals
+  - TALENT KEYHOLE sources protected
+  - ORIGINATOR CONTROLLED
+  - Destroy by burning in presence of two authorized personnel
+  - May not be reproduced
+operational_notes: |
+  - Presidential finding authorization required
+  - Interagency coordination mandatory
+  - Legal review completed
+  - Blue team fully briefed under compartmented access
+  - Strategic deconfliction with allied services
+  - Emergency abort: WINTER FALCON
+  - Compromise protocol: BROKEN ARROW
+security_controls: |
+  - Dual authentication required for all destructive operations
+  - Three-person rule for strategic phase initiation
+  - Continuous monitoring by oversight team
+  - Real-time legal counsel availability
+  - Immediate abort capability maintained
+  - Full TEMPEST-grade audit trail
+  - Quantum-resistant encryption for all C2
+intelligence_priorities: |
+  1. Critical infrastructure vulnerabilities
+  2. Adversary cyber capabilities
+  3. Supply chain dependencies
+  4. Strategic communications intercepts
+  5. Financial warfare vectors
+  6. Attribution management techniques

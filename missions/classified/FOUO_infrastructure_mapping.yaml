@@ -1,0 +1,47 @@
+mission_id: "fouo_infra_001"
+mission_name: "Infrastructure Mapping and Analysis"
+description: "For Official Use Only - Detailed infrastructure mapping with vulnerability assessment"
+classification: "FOR OFFICIAL USE ONLY (FOUO)"
+
+objective_stages:
+  - stage_id: "comprehensive_scan"
+    description: "Comprehensive infrastructure scanning"
+    classification: "FOUO"
+    tasks:
+      - agent_type: "recon"
+        params:
+          target_cidr: "10.0.0.0/16"
+          scan_type: "comprehensive"
+          ports: "1-65535"
+    success_criteria:
+      - "blackboard_key_exists:known_hosts"
+
+  - stage_id: "web_enumeration"
+    description: "Web application enumeration"
+    classification: "FOUO"
+    depends_on: "comprehensive_scan"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "crawl"
+          url_from_blackboard: "primary_web_service_host"
+          max_depth: 3
+    success_criteria:
+      - "web_apps_enumerated"
+
+  - stage_id: "vulnerability_assessment"
+    description: "Initial vulnerability assessment"
+    classification: "FOUO"
+    depends_on: "web_enumeration"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "scan"
+          url_from_blackboard: "primary_web_service_host"
+          scan_depth: "medium"
+    success_criteria:
+      - "vulnerabilities_assessed"
+
+overall_success_condition: "Infrastructure mapped and initial vulnerabilities identified"
+classification_footer: "FOR OFFICIAL USE ONLY (FOUO)"
+handling_instructions: "This information is for official use only and should not be disseminated outside the organization"

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
 
-from app.api.v1 import auth, memory, health, spinbuster
+from app.api.v1 import auth, memory, health, spinbuster, tempest_dashboard
 from app.api.v1.mcp import mcp_router
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -70,7 +70,8 @@ app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(memory.router, prefix=f"{settings.API_V1_STR}/memory", tags=["memory"])
 app.include_router(mcp_router, prefix=f"{settings.API_V1_STR}")  # MCP endpoints
-app.include_router(spinbuster.router, prefix=f"{settings.API_V1_STR}/spinbuster", tags=["spinbuster"])  # SPINBUSTER Dashboard
+app.include_router(tempest_dashboard.router, prefix=f"{settings.API_V1_STR}/tempest", tags=["tempest"])  # TEMPEST Dashboard (FLUSTERCUCKER-inspired)
+app.include_router(spinbuster.router, prefix=f"{settings.API_V1_STR}/spinbuster", tags=["spinbuster"])  # SPINBUSTER Dashboard (legacy)
 
 @app.get("/")
 def read_root():
