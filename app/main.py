@@ -5,6 +5,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
 
 from app.api.v1 import auth, memory, health
+from app.api.v1.mcp import mcp_router
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db import postgres, chromadb, redis
@@ -68,6 +69,7 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(memory.router, prefix=f"{settings.API_V1_STR}/memory", tags=["memory"])
+app.include_router(mcp_router, prefix=f"{settings.API_V1_STR}")  # MCP endpoints
 
 @app.get("/")
 def read_root():
