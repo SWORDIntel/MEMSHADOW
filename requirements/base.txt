@@ -37,6 +37,9 @@ celery[redis]
 # Monitoring
 prometheus-fastapi-instrumentator
 
+# TUI
+rich>=13.0.0
+
 # Document Processing
 pymupdf  # PDF processing with text and image extraction
 python-docx  # Word document processing

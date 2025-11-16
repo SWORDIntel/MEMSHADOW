@@ -600,7 +600,12 @@ cmd_help() {
     echo ""
     cat << EOF
 USAGE:
+    memshadow                   Launch interactive TUI dashboard (default)
     memshadow <command> [options]
+
+INTERACTIVE DASHBOARD:
+    tui | dashboard     Launch interactive TUI dashboard
+    (default when no command specified)
 
 COMMANDS:
     start               Start MEMSHADOW services
@@ -624,6 +629,8 @@ COMMANDS:
     help                Show this help message
 
 EXAMPLES:
+    memshadow                        # Launch interactive dashboard
+    memshadow tui                    # Launch interactive dashboard
     memshadow status
     memshadow logs memshadow --follow
     memshadow backup
@@ -650,12 +657,39 @@ Classification: UNCLASSIFIED
 EOF
 }
 
+# Launch interactive TUI dashboard
+cmd_tui() {
+    check_installed
+
+    # Check if Python 3 is available
+    if ! command -v python3 &> /dev/null; then
+        log_error "Python 3 is required for the TUI dashboard"
+        exit 1
+    fi
+
+    # Check if rich is installed
+    if ! python3 -c "import rich" &> /dev/null; then
+        log_warn "Installing required Python package 'rich'..."
+        pip3 install rich || {
+            log_error "Failed to install 'rich'. Install manually: pip3 install rich"
+            exit 1
+        }
+    fi
+
+    # Launch TUI
+    cd "$MEMSHADOW_ROOT"
+    python3 -m app.tui.dashboard
+}
+
 # Main command dispatcher
 main() {
-    local command="${1:-help}"
+    local command="${1:-tui}"
     shift || true
 
     case "$command" in
+        tui|dashboard|"")
+            cmd_tui "$@"
+            ;;
         start)
             cmd_start "$@"
             ;;
