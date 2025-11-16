@@ -1,0 +1,191 @@
+# MEMSHADOW Prometheus Alert Rules
+# Classification: UNCLASSIFIED
+
+groups:
+  - name: memshadow_application
+    interval: 30s
+    rules:
+      - alert: MEMSHADOWDown
+        expr: up{job="memshadow"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          classification: unclassified
+        annotations:
+          summary: "MEMSHADOW application is down"
+          description: "MEMSHADOW has been down for more than 1 minute"
+
+      - alert: MEMSHADOWHighErrorRate
+        expr: rate(memshadow_http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} errors/second"
+
+      - alert: MEMSHADOWHighLatency
+        expr: histogram_quantile(0.95, rate(memshadow_http_request_duration_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile latency is {{ $value }}s"
+
+  - name: memshadow_c2
+    interval: 30s
+    rules:
+      - alert: C2SessionsHigh
+        expr: memshadow_c2_sessions_active > 100
+        for: 5m
+        labels:
+          severity: info
+          classification: unclassified
+        annotations:
+          summary: "High number of C2 sessions"
+          description: "{{ $value }} active C2 sessions"
+
+      - alert: C2NoActiveSessions
+        expr: memshadow_c2_sessions_active == 0
+        for: 30m
+        labels:
+          severity: info
+          classification: unclassified
+        annotations:
+          summary: "No active C2 sessions"
+          description: "No C2 sessions active for 30 minutes"
+
+      - alert: C2HighDataExfiltration
+        expr: rate(memshadow_c2_data_exfiltrated_bytes_total[5m]) > 10485760  # 10MB/s
+        for: 5m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High data exfiltration rate"
+          description: "Exfiltrating {{ $value | humanize }}B/s"
+
+  - name: memshadow_missions
+    interval: 30s
+    rules:
+      - alert: MissionFailureRate
+        expr: rate(memshadow_missions_total{status="failed"}[10m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High mission failure rate"
+          description: "{{ $value }} missions failing per second"
+
+      - alert: MissionDurationHigh
+        expr: histogram_quantile(0.95, rate(memshadow_mission_duration_seconds_bucket[10m])) > 7200
+        for: 15m
+        labels:
+          severity: info
+          classification: unclassified
+        annotations:
+          summary: "Missions taking longer than expected"
+          description: "95th percentile mission duration is {{ $value }}s"
+
+  - name: memshadow_database
+    interval: 30s
+    rules:
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          classification: unclassified
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database has been down for more than 1 minute"
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          classification: unclassified
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache has been down for more than 1 minute"
+
+      - alert: DatabaseConnectionsHigh
+        expr: memshadow_db_connections_active{database="postgres"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High database connection count"
+          description: "{{ $value }} active database connections"
+
+      - alert: DatabaseSlowQueries
+        expr: histogram_quantile(0.95, rate(memshadow_db_query_duration_seconds_bucket[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile query time is {{ $value }}s"
+
+  - name: memshadow_system
+    interval: 30s
+    rules:
+      - alert: HighMemoryUsage
+        expr: (memshadow_system_memory_usage_bytes / 1024 / 1024 / 1024) > 14  # 14GB
+        for: 10m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanize }}GB"
+
+      - alert: HighCPUUsage
+        expr: memshadow_system_cpu_usage_percent > 80
+        for: 15m
+        labels:
+          severity: warning
+          classification: unclassified
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}%"
+
+  - name: memshadow_security
+    interval: 30s
+    rules:
+      - alert: CriticalVulnerabilityFound
+        expr: increase(memshadow_vulnerabilities_found_total{severity="critical"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: high
+          classification: unclassified
+        annotations:
+          summary: "Critical vulnerability discovered"
+          description: "{{ $value }} critical vulnerabilities found in last 5 minutes"
+
+      - alert: HighThreatIOCs
+        expr: increase(memshadow_iocs_detected_total{threat_level="critical"}[10m]) > 10
+        for: 5m
+        labels:
+          severity: high
+          classification: unclassified
+        annotations:
+          summary: "High number of critical IOCs detected"
+          description: "{{ $value }} critical IOCs detected in last 10 minutes"
+
+      - alert: SentinelAlertsHigh
+        expr: rate(memshadow_sentinel_alerts_total{severity="critical"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: high
+          classification: unclassified
+        annotations:
+          summary: "High rate of Sentinel critical alerts"
+          description: "{{ $value }} critical alerts per second"

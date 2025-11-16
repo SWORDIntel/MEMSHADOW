@@ -8,6 +8,7 @@ from app.api.v1 import auth, memory, health, spinbuster, tempest_dashboard, c2
 from app.api.v1.mcp import mcp_router
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.metrics import get_metrics
 from app.db import postgres, chromadb, redis
 from app.api.middleware import (
     RequestIDMiddleware,
@@ -77,3 +78,8 @@ app.include_router(spinbuster.router, prefix=f"{settings.API_V1_STR}/spinbuster"
 @app.get("/")
 def read_root():
     return {"project": settings.PROJECT_NAME, "version": settings.VERSION}
+
+@app.get(f"{settings.API_V1_STR}/metrics")
+async def metrics_endpoint():
+    """Prometheus metrics endpoint"""
+    return await get_metrics()
