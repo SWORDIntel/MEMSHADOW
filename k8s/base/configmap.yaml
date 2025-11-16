@@ -1,0 +1,84 @@
+---
+# MEMSHADOW ConfigMap
+# Classification: UNCLASSIFIED
+# Non-sensitive configuration values
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memshadow-config
+  namespace: memshadow
+  labels:
+    app.kubernetes.io/name: memshadow
+    app.kubernetes.io/component: configuration
+data:
+  # API Configuration
+  PROJECT_NAME: "MEMSHADOW"
+  VERSION: "2.1"
+  API_V1_STR: "/api/v1"
+  ALLOWED_HOSTS: "*"
+
+  # Database Configuration
+  POSTGRES_SERVER: "postgres-service"
+  POSTGRES_USER: "memshadow"
+  POSTGRES_DB: "memshadow"
+
+  # Redis Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+  # ChromaDB Configuration
+  CHROMA_HOST: "chromadb-service"
+  CHROMA_PORT: "8000"
+  CHROMA_COLLECTION: "memshadow_memories"
+
+  # Classification
+  DEFAULT_CLASSIFICATION: "UNCLASSIFIED"
+  REQUIRE_AUTHORIZATION: "true"
+  AUTHORIZATION_CONTEXT: "security_research"
+
+  # Logging
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+  LOG_FILE: "/app/logs/memshadow.log"
+  AUDIT_LOG_FILE: "/app/logs/audit.log"
+
+  # C2 Configuration
+  C2_BEACON_INTERVAL: "60"
+  C2_SESSION_TIMEOUT: "300"
+  C2_ENCRYPTION_ENABLED: "true"
+  C2_TLS_ENABLED: "true"
+  C2_PORT: "8443"
+
+  # TEMPEST Configuration
+  TEMPEST_CLASSIFICATION: "UNCLASSIFIED"
+  TEMPEST_BANNER_ENABLED: "true"
+  TEMPEST_COLOR_SCHEME: "military"
+  TEMPEST_PORT: "8080"
+
+  # Hardware Acceleration
+  ENABLE_GPU: "false"
+  ENABLE_NPU: "false"
+  ENABLE_AVX512: "true"
+  ENABLE_OPENVINO: "false"
+
+  # SWARM Configuration
+  SWARM_MAX_AGENTS: "8"
+  SWARM_TASK_TIMEOUT: "300"
+  SWARM_COORDINATION_MODE: "blackboard"
+
+  # Feature Flags
+  FEATURE_C2_ENABLED: "true"
+  FEATURE_LURECRAFT_ENABLED: "true"
+  FEATURE_WIFI_CRACKING: "false"
+  FEATURE_BLOCKCHAIN_ANALYSIS: "true"
+
+  # Monitoring
+  SENTINEL_ENABLED: "true"
+  PROMETHEUS_ENABLED: "true"
+
+  # Rate Limiting
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_PER_HOUR: "1000"
+  RATE_LIMIT_BURST: "100"
