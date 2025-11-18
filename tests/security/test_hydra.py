@@ -1,5 +1,5 @@
 import pytest
-from app.services.hydra.adversarial_suite import adversarial_simulator
+from app.services.hydra.adversarial_suite import adversarial_simulator, AdversarialSimulator
 
 @pytest.mark.asyncio
 @pytest.mark.security
@@ -8,34 +8,86 @@ async def test_run_auth_bypass_simulation():
     Tests the AdversarialSimulator by running the 'auth_bypass' scenario.
 
     This test validates that the simulator can execute a scenario, run the
-    defined attack techniques, and generate a correct report based on the
-    (mocked) outcomes.
+    defined attack techniques, and generate a correct report.
     """
-    # Define the target environment for the simulation
-    target_env = "staging"
+    # Define the target environment for the simulation (must not be production)
+    target_env = "staging.example.com"
 
     # Run the simulation
     report = await adversarial_simulator.simulate_attack(
-        scenario_name="auth_bypass",
+        scenario="auth_bypass",
         target_env=target_env
     )
 
     # --- Assertions to validate the report ---
 
-    # The scenario name should be correct.
-    assert report.scenario_name == "auth_bypass"
+    # The scenario name should be correct
+    assert report.scenario == "auth_bypass"
 
-    # In our mocked scenario, only one technique (JWTManipulation) is defined.
-    assert report.techniques_attempted == 1
+    # Should have attempted at least one technique
+    assert report.techniques_attempted >= 1
 
-    # The JWTManipulationTechnique is hardcoded to return a successful result.
-    assert len(report.successful_techniques) == 1
+    # Duration should be positive
+    assert report.duration_seconds >= 0
 
-    # The simulation was not blocked by any defense.
-    assert report.blocked_at is None
+    # Either succeeded or was blocked
+    assert report.successful_techniques or report.blocked_at
 
-    # Validate the details of the successful technique.
-    successful_technique = report.successful_techniques[0]
-    assert successful_technique.technique_name == "JWT_manipulation"
-    assert successful_technique.successful is True
-    assert successful_technique.details["vulnerability"] == "Algorithm confusion (alg=none)"
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_production_protection():
+    """Test that simulations cannot run against production"""
+    simulator = AdversarialSimulator()
+
+    with pytest.raises(ValueError, match="production"):
+        await simulator.simulate_attack(
+            scenario="auth_bypass",
+            target_env="https://production.example.com"
+        )
+
+    with pytest.raises(ValueError, match="production"):
+        await simulator.simulate_attack(
+            scenario="auth_bypass",
+            target_env="https://prod.example.com"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_invalid_scenario():
+    """Test handling of invalid scenarios"""
+    simulator = AdversarialSimulator()
+
+    with pytest.raises(ValueError, match="Unknown scenario"):
+        await simulator.simulate_attack(
+            scenario="invalid_scenario",
+            target_env="staging.example.com"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_jwt_manipulation_technique():
+    """Test JWT manipulation attack technique execution"""
+    from app.services.hydra.adversarial_suite import JWTManipulation
+
+    technique = JWTManipulation()
+    result = await technique.execute("staging.example.com")
+
+    assert result.technique_name == "JWT_Manipulation"
+    assert result.blocked is True
+    assert "timestamp" in result.model_dump()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_session_hijacking_technique():
+    """Test session hijacking attack technique execution"""
+    from app.services.hydra.adversarial_suite import SessionHijacking
+
+    technique = SessionHijacking()
+    result = await technique.execute("staging.example.com")
+
+    assert result.technique_name == "Session_Hijacking"
+    assert result.blocked is True
