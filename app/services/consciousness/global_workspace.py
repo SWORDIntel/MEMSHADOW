@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from collections import deque
+import asyncio
 import uuid
 import heapq
 import structlog
@@ -184,11 +186,15 @@ class GlobalWorkspace:
         # Statistics
         self.total_broadcasts = 0
         self.total_items_processed = 0
-        self.item_lifetimes: List[float] = []
+        # Use bounded deque to prevent unbounded growth
+        self.item_lifetimes: deque = deque(maxlen=1000)
 
         # Background tasks
         self._broadcast_task = None
         self._decay_task = None
+
+        # Thread safety lock for concurrent access
+        self._lock = asyncio.Lock()
 
         logger.info(
             "Global workspace initialized",
@@ -198,8 +204,6 @@ class GlobalWorkspace:
 
     async def start(self):
         """Start workspace background tasks"""
-        import asyncio
-
         logger.info("Starting global workspace")
 
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
@@ -211,10 +215,18 @@ class GlobalWorkspace:
         """Stop workspace background tasks"""
         logger.info("Stopping global workspace")
 
+        # Cancel tasks and await their completion
+        tasks_to_cancel = []
         if self._broadcast_task:
             self._broadcast_task.cancel()
+            tasks_to_cancel.append(self._broadcast_task)
         if self._decay_task:
             self._decay_task.cancel()
+            tasks_to_cancel.append(self._decay_task)
+
+        # Wait for tasks to finish cancelling
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
     def subscribe_module(self, module_name: str):
         """Subscribe a module to workspace broadcasts"""
@@ -237,40 +249,47 @@ class GlobalWorkspace:
         Returns:
             True if item was added, False if rejected
         """
-        # If workspace is full, check if new item should replace something
-        if len(self.items) >= self.capacity:
-            # Find lowest activation item
-            lowest_item = min(self.items.values(), key=lambda i: i.activation_level)
+        # Use lock to prevent race conditions
+        async with self._lock:
+            # If workspace is full, check if new item should replace something
+            if len(self.items) >= self.capacity:
+                # Find lowest activation item
+                lowest_item = min(self.items.values(), key=lambda i: i.activation_level)
 
-            # New item must have higher activation to enter
-            if item.activation_level <= lowest_item.activation_level:
-                logger.debug(
-                    "Item rejected - insufficient activation",
-                    item_id=item.item_id,
-                    activation=item.activation_level,
-                    threshold=lowest_item.activation_level
-                )
-                return False
+                # New item must have higher activation to enter
+                if item.activation_level <= lowest_item.activation_level:
+                    logger.debug(
+                        "Item rejected - insufficient activation",
+                        item_id=item.item_id,
+                        activation=item.activation_level,
+                        threshold=lowest_item.activation_level
+                    )
+                    return False
 
-            # Evict lowest activation item
-            await self.remove_item(lowest_item.item_id, reason="evicted")
+                # Evict lowest activation item (call internal version without lock)
+                await self._remove_item_internal(lowest_item.item_id, reason="evicted")
 
-        # Add item
-        self.items[item.item_id] = item
-        heapq.heappush(self._item_heap, item)
+            # Add item
+            self.items[item.item_id] = item
+            heapq.heappush(self._item_heap, item)
 
-        logger.info(
-            "Item added to workspace",
-            item_id=item.item_id,
-            source=item.source_module,
-            activation=item.activation_level,
-            workspace_utilization=f"{len(self.items)}/{self.capacity}"
-        )
+            logger.info(
+                "Item added to workspace",
+                item_id=item.item_id,
+                source=item.source_module,
+                activation=item.activation_level,
+                workspace_utilization=f"{len(self.items)}/{self.capacity}"
+            )
 
-        return True
+            return True
 
     async def remove_item(self, item_id: str, reason: str = "removed"):
-        """Remove item from workspace"""
+        """Remove item from workspace (public method with lock)"""
+        async with self._lock:
+            await self._remove_item_internal(item_id, reason)
+
+    async def _remove_item_internal(self, item_id: str, reason: str = "removed"):
+        """Remove item from workspace (internal, assumes lock is held)"""
         if item_id not in self.items:
             return
 

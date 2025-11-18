@@ -242,6 +242,99 @@ class SelfModifyingEngine:
             "details": results
         }
 
+    async def analyze_function_source(
+        self,
+        source_code: str,
+        function_name: str,
+        categories: Optional[List[ImprovementCategory]] = None,
+        auto_apply: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Analyze and improve function from source code (safer than exec).
+
+        Args:
+            source_code: Function source code
+            function_name: Name of function to analyze
+            categories: Improvement categories to consider
+            auto_apply: Automatically apply safe improvements
+
+        Returns:
+            Improvement results
+        """
+        import ast
+
+        self.total_requests += 1
+
+        request_id = f"req_{self.total_requests}"
+        categories = categories or list(ImprovementCategory)
+
+        logger.info(
+            "Improvement requested (source-based)",
+            request_id=request_id,
+            function=function_name,
+            categories=[c.value for c in categories]
+        )
+
+        # Step 1: Parse AST and introspect using source code
+        try:
+            metrics = await self.introspector.analyze_source(source_code, function_name)
+        except Exception as e:
+            logger.error(f"Failed to analyze source: {e}")
+            return {
+                "success": False,
+                "error": f"Failed to analyze source: {str(e)}"
+            }
+
+        # Step 2: Generate improvement proposals
+        proposals = await self.proposer.propose_improvements(
+            code_metrics=metrics,
+            source_code=source_code
+        )
+
+        # Filter by category
+        proposals = [
+            p for p in proposals
+            if p.category in categories
+        ]
+
+        if not proposals:
+            logger.info("No improvements suggested")
+            return {
+                "success": True,
+                "proposals_count": 0,
+                "message": "No improvements needed",
+                "metrics": {
+                    "cyclomatic_complexity": metrics.cyclomatic_complexity,
+                    "cognitive_complexity": metrics.cognitive_complexity,
+                    "lines_of_code": metrics.lines_of_code
+                }
+            }
+
+        # Step 3: Process each proposal
+        results = []
+
+        for proposal in proposals:
+            result = await self._process_proposal(
+                proposal, metrics, source_code, auto_apply
+            )
+            results.append(result)
+
+        # Summary
+        applied_count = sum(1 for r in results if r.success)
+
+        return {
+            "success": True,
+            "proposals_count": len(proposals),
+            "improvements_applied": applied_count,
+            "improvements_pending": len(proposals) - applied_count,
+            "metrics": {
+                "cyclomatic_complexity": metrics.cyclomatic_complexity,
+                "cognitive_complexity": metrics.cognitive_complexity,
+                "lines_of_code": metrics.lines_of_code
+            },
+            "details": results
+        }
+
     async def improve_module(
         self,
         module_path: str,

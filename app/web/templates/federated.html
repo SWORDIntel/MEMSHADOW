@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEMSHADOW | Federated Learning</title>
+    <link rel="stylesheet" href="/static/css/tempest-class-c.css">
+</head>
+<body>
+    <div class="tempest-header">
+        <div class="tempest-header-title">
+            <h1>◉ MEMSHADOW | FEDERATED LEARNING</h1>
+            <div class="tempest-classification">TEMPEST CLASS C</div>
+        </div>
+        <nav class="tempest-nav">
+            <a href="/">DASHBOARD</a>
+            <a href="/federated" class="active">FEDERATED LEARNING</a>
+            <a href="/meta-learning">META-LEARNING</a>
+            <a href="/consciousness">CONSCIOUSNESS</a>
+            <a href="/self-modifying">SELF-MODIFICATION</a>
+        </nav>
+    </div>
+
+    <div class="tempest-container">
+        <!-- Control Panel -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ FEDERATED COORDINATOR CONTROL</h2>
+                <div>
+                    <span class="tempest-status-dot" id="fed-status-dot"></span>
+                    <span id="fed-status-text">OFFLINE</span>
+                </div>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-btn-group">
+                    <button class="tempest-btn tempest-btn-success" onclick="startCoordinator()">START COORDINATOR</button>
+                    <button class="tempest-btn tempest-btn-danger" onclick="stopCoordinator()">STOP COORDINATOR</button>
+                    <button class="tempest-btn" onclick="refreshStatus()">REFRESH</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Grid -->
+        <div class="tempest-grid tempest-grid-4">
+            <div class="tempest-panel">
+                <div class="tempest-metric">
+                    <span class="tempest-metric-value" id="peer-count">0</span>
+                    <span class="tempest-metric-label">Connected Peers</span>
+                </div>
+            </div>
+
+            <div class="tempest-panel">
+                <div class="tempest-metric">
+                    <span class="tempest-metric-value" id="updates-sent">0</span>
+                    <span class="tempest-metric-label">Updates Sent</span>
+                </div>
+            </div>
+
+            <div class="tempest-panel">
+                <div class="tempest-metric">
+                    <span class="tempest-metric-value" id="updates-received">0</span>
+                    <span class="tempest-metric-label">Updates Received</span>
+                </div>
+            </div>
+
+            <div class="tempest-panel">
+                <div class="tempest-metric">
+                    <span class="tempest-metric-value" id="privacy-budget">N/A</span>
+                    <span class="tempest-metric-label">Privacy Budget</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Peer Management -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ PEER MANAGEMENT</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-form-group">
+                    <label class="tempest-label">Add Peer Addresses (one per line)</label>
+                    <textarea class="tempest-input" id="peer-addresses" rows="5" placeholder="node_002:8000&#10;node_003:8000&#10;192.168.1.100:8000"></textarea>
+                </div>
+
+                <button class="tempest-btn tempest-btn-success" onclick="joinPeers()">JOIN FEDERATION</button>
+
+                <h3 class="tempest-mt-lg">Connected Peers</h3>
+                <table class="tempest-table">
+                    <thead>
+                        <tr>
+                            <th>Peer ID</th>
+                            <th>Status</th>
+                            <th>Last Sync</th>
+                            <th>Updates Exchanged</th>
+                        </tr>
+                    </thead>
+                    <tbody id="peer-list">
+                        <tr>
+                            <td colspan="4" class="tempest-text-center">No peers connected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Privacy Configuration -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ DIFFERENTIAL PRIVACY CONFIGURATION</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-grid tempest-grid-2">
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Privacy Budget (ε)</label>
+                        <input type="number" class="tempest-input" id="epsilon" value="1.0" step="0.1" min="0.1" max="10.0">
+                        <small style="color: var(--tempest-text-muted);">
+                            Lower values = stronger privacy (ε=1.0 recommended)
+                        </small>
+                    </div>
+
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Delta (δ)</label>
+                        <input type="number" class="tempest-input" id="delta" value="0.00001" step="0.00001">
+                        <small style="color: var(--tempest-text-muted);">
+                            Probability of privacy breach (typically 1/n²)
+                        </small>
+                    </div>
+
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Privacy Mechanism</label>
+                        <select class="tempest-select" id="mechanism">
+                            <option value="laplace">Laplace Mechanism</option>
+                            <option value="gaussian" selected>Gaussian Mechanism</option>
+                            <option value="exponential">Exponential Mechanism</option>
+                        </select>
+                    </div>
+
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Gradient Clipping Norm</label>
+                        <input type="number" class="tempest-input" id="clip-norm" value="1.0" step="0.1">
+                        <small style="color: var(--tempest-text-muted);">
+                            Maximum norm for gradient clipping
+                        </small>
+                    </div>
+                </div>
+
+                <div class="tempest-alert tempest-alert-info tempest-mt-md">
+                    <strong>PRIVACY NOTE:</strong> Differential privacy (ε-DP) ensures that individual data points cannot be identified. Lower ε values provide stronger privacy but may reduce model accuracy.
+                </div>
+            </div>
+        </div>
+
+        <!-- Gossip Protocol Configuration -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ GOSSIP PROTOCOL CONFIGURATION</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-grid tempest-grid-3">
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Gossip Mode</label>
+                        <select class="tempest-select" id="gossip-mode">
+                            <option value="push">PUSH (Send only)</option>
+                            <option value="pull">PULL (Request only)</option>
+                            <option value="push_pull" selected>PUSH-PULL (Hybrid)</option>
+                        </select>
+                    </div>
+
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Fanout (peers per round)</label>
+                        <input type="number" class="tempest-input" id="fanout" value="3" min="1" max="10">
+                    </div>
+
+                    <div class="tempest-form-group">
+                        <label class="tempest-label">Sync Interval (seconds)</label>
+                        <input type="number" class="tempest-input" id="sync-interval" value="60" min="10" max="300">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Send Update -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ BROADCAST UPDATE</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-form-group">
+                    <label class="tempest-label">Update Type</label>
+                    <select class="tempest-select" id="update-type">
+                        <option value="pattern">Security Pattern</option>
+                        <option value="embedding">Memory Embedding</option>
+                        <option value="model_update">Model Update</option>
+                        <option value="metric">Performance Metric</option>
+                    </select>
+                </div>
+
+                <div class="tempest-form-group">
+                    <label class="tempest-label">Update Data (JSON)</label>
+                    <textarea class="tempest-input" id="update-data" rows="10" placeholder='{
+  "type": "pattern",
+  "embedding": [0.1, 0.2, 0.3, ...],
+  "confidence": 0.95,
+  "metadata": {...}
+}'></textarea>
+                </div>
+
+                <div class="tempest-form-group">
+                    <label class="tempest-label">Privacy Budget for this Update</label>
+                    <input type="range" id="update-privacy-budget" min="0.01" max="1.0" step="0.01" value="0.1">
+                    <span id="privacy-budget-value">0.1 (10%)</span>
+                </div>
+
+                <button class="tempest-btn tempest-btn-success" onclick="broadcastUpdate()">BROADCAST UPDATE</button>
+            </div>
+        </div>
+
+        <!-- Recent Updates Log -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ RECENT UPDATES</h2>
+                <button class="tempest-btn" onclick="clearUpdateLog()">CLEAR</button>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-terminal" id="update-log">
+                    <div class="tempest-terminal-line">
+                        <span class="tempest-terminal-prompt">[INFO]</span>
+                        <span class="tempest-terminal-output">No updates yet</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/memshadow.js"></script>
+    <script>
+        // Auto-refresh
+        let refreshInterval;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStatus();
+            refreshInterval = setInterval(refreshStatus, 5000);
+
+            // Update privacy budget display
+            document.getElementById('update-privacy-budget').addEventListener('input', function(e) {
+                const value = parseFloat(e.target.value);
+                document.getElementById('privacy-budget-value').textContent =
+                    `${value.toFixed(2)} (${(value * 100).toFixed(0)}%)`;
+            });
+        });
+
+        async function refreshStatus() {
+            try {
+                const stats = await MEMSHADOW_API.getFederatedStats();
+
+                if (stats.status === 'not_running') {
+                    document.getElementById('fed-status-dot').className = 'tempest-status-dot offline';
+                    document.getElementById('fed-status-text').textContent = 'OFFLINE';
+                    document.getElementById('peer-count').textContent = '0';
+                    document.getElementById('updates-sent').textContent = '0';
+                    document.getElementById('updates-received').textContent = '0';
+                    document.getElementById('privacy-budget').textContent = 'N/A';
+                } else {
+                    document.getElementById('fed-status-dot').className = 'tempest-status-dot operational';
+                    document.getElementById('fed-status-text').textContent = 'OPERATIONAL';
+                    document.getElementById('peer-count').textContent = stats.peer_count || 0;
+                    document.getElementById('updates-sent').textContent = stats.updates_sent || 0;
+                    document.getElementById('updates-received').textContent = stats.updates_received || 0;
+                    document.getElementById('privacy-budget').textContent =
+                        (stats.privacy_budget_remaining || 0).toFixed(2);
+
+                    // Update peer list
+                    await updatePeerList();
+                }
+
+            } catch (error) {
+                logUpdate('ERROR', 'Failed to refresh status: ' + error.message);
+            }
+        }
+
+        async function updatePeerList() {
+            try {
+                const response = await MEMSHADOW_API.getFederatedPeers();
+                const peers = response.peers || [];
+
+                const tbody = document.getElementById('peer-list');
+
+                if (peers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="tempest-text-center">No peers connected</td></tr>';
+                } else {
+                    tbody.innerHTML = peers.map(peer => `
+                        <tr>
+                            <td>${peer}</td>
+                            <td><span class="tempest-status-dot operational"></span> CONNECTED</td>
+                            <td>Just now</td>
+                            <td>--</td>
+                        </tr>
+                    `).join('');
+                }
+
+            } catch (error) {
+                console.error('Failed to update peer list:', error);
+            }
+        }
+
+        async function startCoordinator() {
+            try {
+                logUpdate('INFO', 'Starting federated coordinator...');
+
+                const response = await MEMSHADOW_API.startFederated();
+
+                logUpdate('SUCCESS', response.message);
+                NotificationManager.success('Federated coordinator started');
+
+                await refreshStatus();
+
+            } catch (error) {
+                logUpdate('ERROR', 'Failed to start coordinator: ' + error.message);
+                NotificationManager.error('Failed to start coordinator: ' + error.message);
+            }
+        }
+
+        async function stopCoordinator() {
+            try {
+                logUpdate('INFO', 'Stopping federated coordinator...');
+
+                const response = await MEMSHADOW_API.stopFederated();
+
+                logUpdate('SUCCESS', response.message);
+                NotificationManager.success('Federated coordinator stopped');
+
+                await refreshStatus();
+
+            } catch (error) {
+                logUpdate('ERROR', 'Failed to stop coordinator: ' + error.message);
+                NotificationManager.error('Failed to stop coordinator: ' + error.message);
+            }
+        }
+
+        async function joinPeers() {
+            const peerText = document.getElementById('peer-addresses').value.trim();
+
+            if (!peerText) {
+                NotificationManager.warning('Please enter peer addresses');
+                return;
+            }
+
+            const peers = peerText.split('\n').map(p => p.trim()).filter(p => p);
+
+            try {
+                logUpdate('INFO', `Joining federation with ${peers.length} peers...`);
+
+                const response = await MEMSHADOW_API.joinFederation(peers);
+
+                logUpdate('SUCCESS', response.message);
+                NotificationManager.success('Joined federation');
+
+                document.getElementById('peer-addresses').value = '';
+                await refreshStatus();
+
+            } catch (error) {
+                logUpdate('ERROR', 'Failed to join federation: ' + error.message);
+                NotificationManager.error('Failed to join federation: ' + error.message);
+            }
+        }
+
+        async function broadcastUpdate() {
+            const updateType = document.getElementById('update-type').value;
+            const updateData = document.getElementById('update-data').value.trim();
+            const privacyBudget = parseFloat(document.getElementById('update-privacy-budget').value);
+
+            if (!updateData) {
+                NotificationManager.warning('Please enter update data');
+                return;
+            }
+
+            let data;
+            try {
+                data = JSON.parse(updateData);
+            } catch (error) {
+                NotificationManager.error('Invalid JSON data');
+                return;
+            }
+
+            data.type = updateType;
+
+            try {
+                logUpdate('INFO', 'Broadcasting update...');
+
+                const response = await MEMSHADOW_API.shareFederatedUpdate(data, privacyBudget);
+
+                logUpdate('SUCCESS', `Update broadcast successfully (ID: ${response.update_id})`);
+                logUpdate('INFO', `Privacy budget spent: ${privacyBudget.toFixed(2)}`);
+
+                NotificationManager.success('Update broadcast successfully');
+
+                document.getElementById('update-data').value = '';
+                await refreshStatus();
+
+            } catch (error) {
+                logUpdate('ERROR', 'Failed to broadcast update: ' + error.message);
+                NotificationManager.error('Failed to broadcast update: ' + error.message);
+            }
+        }
+
+        function logUpdate(level, message) {
+            const log = document.getElementById('update-log');
+            const timestamp = new Date().toLocaleTimeString();
+            const line = document.createElement('div');
+            line.className = 'tempest-terminal-line';
+
+            const className = level === 'ERROR' ? 'tempest-terminal-error' : 'tempest-terminal-output';
+
+            line.innerHTML = `
+                <span class="tempest-terminal-prompt">[${timestamp}] [${level}]</span>
+                <span class="${className}">${message}</span>
+            `;
+
+            log.appendChild(line);
+            log.scrollTop = log.scrollHeight;
+
+            // Keep only last 50 lines
+            while (log.children.length > 50) {
+                log.removeChild(log.firstChild);
+            }
+        }
+
+        function clearUpdateLog() {
+            document.getElementById('update-log').innerHTML = '';
+            logUpdate('INFO', 'Log cleared');
+        }
+    </script>
+</body>
+</html>

@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timedelta
+from collections import deque
 import uuid
 import random
 import asyncio
@@ -142,7 +143,8 @@ class GossipProtocol:
         # State
         self.peers: Dict[str, str] = {}  # node_id -> address
         self.updates: Dict[str, Any] = {}  # update_id -> update_data
-        self.seen_messages: Set[str] = set()
+        # Use bounded deque to prevent unbounded memory growth
+        self.seen_messages: deque = deque(maxlen=10000)  # Keep last 10k messages
 
         # Version vector for causality tracking
         self.version_vector: Dict[str, int] = {node_id: 0}

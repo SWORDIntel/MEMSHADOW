@@ -155,6 +155,7 @@ class FederatedCoordinator:
         # Privacy accounting
         self.privacy_budget_remaining = privacy_budget
         self.privacy_budget_total = privacy_budget
+        self._privacy_lock = asyncio.Lock()  # Prevent race conditions on budget
 
         # Sync configuration
         self.sync_strategy = SyncStrategy.GOSSIP
@@ -255,29 +256,31 @@ class FederatedCoordinator:
         Returns:
             Update ID
         """
-        # Check privacy budget
-        if self.privacy_budget_remaining < privacy_budget:
-            raise ValueError(
-                f"Insufficient privacy budget. "
-                f"Remaining: {self.privacy_budget_remaining:.3f}, "
-                f"Requested: {privacy_budget}"
+        # Atomic check and deduct of privacy budget
+        async with self._privacy_lock:
+            # Check privacy budget
+            if self.privacy_budget_remaining < privacy_budget:
+                raise ValueError(
+                    f"Insufficient privacy budget. "
+                    f"Remaining: {self.privacy_budget_remaining:.3f}, "
+                    f"Requested: {privacy_budget}"
+                )
+
+            # Create update
+            update = FederatedUpdate(
+                update_id=str(uuid.uuid4()),
+                source_node=self.node_id,
+                update_type=update_data.get("type", "unknown"),
+                payload=update_data,
+                privacy_budget=privacy_budget,
+                noise_scale=self._calculate_noise_scale(privacy_budget),
+                version=1
             )
 
-        # Create update
-        update = FederatedUpdate(
-            update_id=str(uuid.uuid4()),
-            source_node=self.node_id,
-            update_type=update_data.get("type", "unknown"),
-            payload=update_data,
-            privacy_budget=privacy_budget,
-            noise_scale=self._calculate_noise_scale(privacy_budget),
-            version=1
-        )
+            # Deduct privacy budget (atomic with check)
+            self.privacy_budget_remaining -= privacy_budget
 
-        # Deduct privacy budget
-        self.privacy_budget_remaining -= privacy_budget
-
-        # Store pending update
+        # Store pending update (outside lock for better concurrency)
         self.pending_updates[update.update_id] = update
 
         # Propagate based on strategy

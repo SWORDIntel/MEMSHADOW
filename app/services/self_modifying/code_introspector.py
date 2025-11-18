@@ -188,6 +188,59 @@ class CodeIntrospector:
 
         return metrics
 
+    async def analyze_source(
+        self,
+        source_code: str,
+        function_name: str
+    ) -> CodeMetrics:
+        """
+        Analyze a function from source code (safer than exec).
+
+        Args:
+            source_code: Python source code containing the function
+            function_name: Name of function to analyze
+
+        Returns:
+            Code metrics
+        """
+        # Parse AST
+        try:
+            tree = ast.parse(source_code)
+        except SyntaxError as e:
+            logger.error(f"Syntax error in source: {e}")
+            return CodeMetrics(file_path="<source>", function_name=function_name)
+
+        # Find the target function in the AST
+        function_node = None
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+                function_node = node
+                break
+
+        if not function_node:
+            logger.error(f"Function '{function_name}' not found in source")
+            return CodeMetrics(file_path="<source>", function_name=function_name)
+
+        # Analyze the function node
+        metrics = self._analyze_ast(function_node, "<source>", function_name, source_code)
+
+        # Check for docstring (from AST)
+        metrics.has_docstring = ast.get_docstring(function_node) is not None
+
+        # Check for type hints (from AST)
+        has_return_annotation = function_node.returns is not None
+        has_arg_annotations = any(arg.annotation is not None for arg in function_node.args.args)
+        metrics.has_type_hints = has_return_annotation or has_arg_annotations
+
+        logger.debug(
+            "Source analyzed",
+            function=function_name,
+            complexity=metrics.complexity_level.value,
+            quality=metrics.quality_score
+        )
+
+        return metrics
+
     async def analyze_file(
         self,
         file_path: str
