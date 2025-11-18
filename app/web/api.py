@@ -17,6 +17,12 @@ import structlog
 
 from app.web.config import ConfigManager, SystemConfig
 from app.web.auth import authenticate_token, create_access_token, authenticate_user
+from app.web.security_middleware import (
+    SecurityHeadersMiddleware,
+    RateLimitMiddleware,
+    RequestValidationMiddleware,
+    AuditLoggingMiddleware
+)
 import os
 
 logger = structlog.get_logger()
@@ -44,6 +50,26 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Security middleware (order matters - innermost first)
+enable_security = os.getenv("ENABLE_SECURITY_MIDDLEWARE", "true").lower() == "true"
+
+if enable_security:
+    # Audit logging (innermost - sees actual request/response)
+    app.add_middleware(AuditLoggingMiddleware)
+
+    # Request validation (before rate limiting to reject bad requests fast)
+    app.add_middleware(RequestValidationMiddleware, enabled=True)
+
+    # Rate limiting (before security headers)
+    app.add_middleware(RateLimitMiddleware, enabled=True)
+
+    # Security headers (outermost - added last to all responses)
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    logger.info("Security middleware enabled")
+else:
+    logger.warning("Security middleware DISABLED - not recommended for production!")
 
 # Security
 security = HTTPBearer()

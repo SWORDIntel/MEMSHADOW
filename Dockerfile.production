@@ -1,0 +1,89 @@
+# Multi-stage build for production MEMSHADOW deployment
+# Optimized for security and minimal size
+
+# ============================================================================
+# Stage 1: Builder - Install dependencies
+# ============================================================================
+FROM python:3.11-slim as builder
+
+# Set working directory
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt requirements-web.txt ./
+
+# Install Python dependencies to /install
+RUN pip install --no-cache-dir --prefix=/install \
+    -r requirements.txt \
+    -r requirements-web.txt
+
+# ============================================================================
+# Stage 2: Runtime - Minimal production image
+# ============================================================================
+FROM python:3.11-slim
+
+# Metadata
+LABEL maintainer="security@memshadow.internal"
+LABEL version="1.0.0"
+LABEL description="MEMSHADOW Production Container - TEMPEST CLASS C"
+
+# Create non-root user
+RUN groupadd -r memshadow && \
+    useradd -r -g memshadow -s /bin/false -d /app memshadow
+
+# Set working directory
+WORKDIR /app
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Copy application code
+COPY --chown=memshadow:memshadow app/ ./app/
+COPY --chown=memshadow:memshadow scripts/ ./scripts/
+COPY --chown=memshadow:memshadow config/ ./config/
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs && \
+    chown -R memshadow:memshadow /app
+
+# Security hardening
+RUN chmod -R 550 /app/app && \
+    chmod -R 550 /app/scripts && \
+    chmod -R 770 /app/data && \
+    chmod -R 770 /app/logs
+
+# Switch to non-root user
+USER memshadow
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/home/memshadow/.local/bin:$PATH"
+
+# Run application
+CMD ["uvicorn", "app.web.api:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "4", \
+     "--log-level", "info", \
+     "--no-access-log"]
