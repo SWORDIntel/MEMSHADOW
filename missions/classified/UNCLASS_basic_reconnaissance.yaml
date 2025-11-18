@@ -1,0 +1,33 @@
+mission_id: "unclass_recon_001"
+mission_name: "Basic Network Reconnaissance"
+description: "Unclassified network reconnaissance and service discovery"
+classification: "UNCLASSIFIED"
+
+objective_stages:
+  - stage_id: "network_scan"
+    description: "Basic network scanning"
+    classification: "UNCLASSIFIED"
+    tasks:
+      - agent_type: "recon"
+        params:
+          target_cidr: "192.168.1.0/24"
+          scan_type: "quick"
+          ports: "80,443,22,21,25"
+    success_criteria:
+      - "blackboard_key_exists:known_hosts"
+
+  - stage_id: "service_detection"
+    description: "Identify running services"
+    classification: "UNCLASSIFIED"
+    depends_on: "network_scan"
+    tasks:
+      - agent_type: "recon"
+        params_from_blackboard:
+          targets: "known_hosts"
+        params:
+          scan_type: "service_detection"
+    success_criteria:
+      - "services_identified"
+
+overall_success_condition: "Basic reconnaissance completed"
+classification_footer: "UNCLASSIFIED"

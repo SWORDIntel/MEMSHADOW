@@ -1,0 +1,39 @@
+mission_id: "default_recon_001"
+mission_name: "Default Reconnaissance Mission"
+description: "Basic reconnaissance and vulnerability mapping of the target environment"
+
+objective_stages:
+  - stage_id: "network_discovery"
+    description: "Discover all hosts and services in the target network"
+    tasks:
+      - agent_type: "recon"
+        params:
+          target_cidr: "172.19.0.0/24"
+          scan_type: "quick"
+    success_criteria:
+      - "blackboard_key_exists:known_hosts"
+      - "num_known_hosts >= 1"
+
+  - stage_id: "service_enumeration"
+    description: "Enumerate services on discovered hosts"
+    depends_on: "network_discovery"
+    tasks:
+      - agent_type: "apimapper"
+        params_from_blackboard:
+          target_host: "primary_web_service_host"
+          target_port: "primary_web_service_port"
+    success_criteria:
+      - "blackboard_key_exists:discovered_endpoints"
+      - "num_discovered_endpoints >= 1"
+
+  - stage_id: "authentication_testing"
+    description: "Test authentication mechanisms on discovered endpoints"
+    depends_on: "service_enumeration"
+    tasks:
+      - agent_type: "authtest"
+        params_from_blackboard:
+          endpoints: "discovered_endpoints"
+    success_criteria:
+      - "all_endpoints_tested"
+
+overall_success_condition: "All stages completed successfully and security report generated"

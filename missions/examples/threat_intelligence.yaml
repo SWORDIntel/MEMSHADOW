@@ -1,0 +1,39 @@
+mission_id: "threat_intel_001"
+mission_name: "Threat Intelligence Collection"
+description: "Collect and analyze threat intelligence from multiple sources"
+
+objective_stages:
+  - stage_id: "bgp_monitoring"
+    description: "Monitor BGP for route hijacking"
+    tasks:
+      - agent_type: "bgp"
+        params:
+          monitor_asns: [13335, 15169, 8075]  # Cloudflare, Google, Microsoft
+          monitor_prefixes: ["1.1.1.0/24"]
+          check_rpki: true
+          analysis_window: 3600
+    success_criteria:
+      - "bgp_routes_analyzed"
+
+  - stage_id: "blockchain_fraud"
+    description: "Analyze blockchain for fraud patterns"
+    tasks:
+      - agent_type: "blockchain"
+        params:
+          chains: ["ethereum", "bitcoin"]
+          analysis_depth: "deep"
+          detect_patterns: ["wash_trading", "pump_dump", "rugpull"]
+    success_criteria:
+      - "blockchain_transactions_analyzed"
+
+  - stage_id: "network_intelligence"
+    description: "Gather network-level intelligence"
+    tasks:
+      - agent_type: "recon"
+        params:
+          target_cidr: "0.0.0.0/0"  # Would be scoped in production
+          scan_type: "quick"
+    success_criteria:
+      - "blackboard_key_exists:known_hosts"
+
+overall_success_condition: "Threat intelligence collected from all sources and correlated"

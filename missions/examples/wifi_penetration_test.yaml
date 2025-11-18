@@ -1,0 +1,75 @@
+mission_id: "wifi_pentest_001"
+mission_name: "WiFi Penetration Testing Mission"
+description: "Comprehensive WiFi security assessment including reconnaissance, capture, and cracking"
+
+objective_stages:
+  - stage_id: "wifi_reconnaissance"
+    description: "ENUMERATE: Discover WiFi networks and clients"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "scan"
+          interface: "wlan0"
+          scan_time: 30
+          show_hidden: true
+          min_power: -80
+    success_criteria:
+      - "wifi_networks_discovered"
+
+  - stage_id: "client_enumeration"
+    description: "ENUMERATE: Enumerate connected clients for target networks"
+    depends_on: "wifi_reconnaissance"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "enumerate"
+          interface: "wlan0"
+          bssid_from_blackboard: "target_wifi_bssid"
+          scan_time: 60
+    success_criteria:
+      - "clients_enumerated"
+
+  - stage_id: "handshake_capture"
+    description: "EXECUTE: Capture WPA handshakes"
+    depends_on: "client_enumeration"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "capture"
+          interface: "wlan0"
+          bssid_from_blackboard: "target_wifi_bssid"
+          channel_from_blackboard: "target_wifi_channel"
+          timeout: 90
+          deauth_count: 20
+    success_criteria:
+      - "handshake_captured"
+
+  - stage_id: "password_cracking"
+    description: "EXECUTE: Crack captured handshakes with hardware acceleration"
+    depends_on: "handshake_capture"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "crack"
+          capture_file_from_blackboard: "handshake_file"
+          wordlist: "/usr/share/wordlists/rockyou.txt"
+          bssid_from_blackboard: "target_wifi_bssid"
+          device: "AVX512"  # or NPU, GPU, NCS2, CPU
+    success_criteria:
+      - "password_cracked_or_attempted"
+
+  - stage_id: "deauth_attack"
+    description: "EXECUTE: Targeted deauth attacks on specific clients"
+    depends_on: "client_enumeration"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "deauth"
+          interface: "wlan0"
+          bssid_from_blackboard: "target_wifi_bssid"
+          client_from_blackboard: "target_client_mac"
+          count: 10
+    success_criteria:
+      - "deauth_attack_executed"
+
+overall_success_condition: "WiFi penetration test completed with handshake capture and password analysis"
