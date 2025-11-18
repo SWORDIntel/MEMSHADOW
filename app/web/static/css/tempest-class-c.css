@@ -1,0 +1,677 @@
+/*
+ * TEMPEST CLASS C Theme
+ * High-security, high-contrast military-grade interface
+ * Electromagnetic emissions security compliant
+ */
+
+/* ============================================================================
+ * TEMPEST Class C Color Palette
+ * ========================================================================= */
+
+:root {
+    /* Background colors - Pure black for minimal EM emissions */
+    --tempest-bg-primary: #000000;
+    --tempest-bg-secondary: #0a0a0a;
+    --tempest-bg-tertiary: #141414;
+    --tempest-bg-elevated: #1a1a1a;
+
+    /* Text colors - High contrast phosphor green */
+    --tempest-text-primary: #00ff41;
+    --tempest-text-secondary: #00cc33;
+    --tempest-text-tertiary: #009926;
+    --tempest-text-muted: #006619;
+
+    /* Accent colors */
+    --tempest-accent-info: #00ffff;      /* Cyan - Info */
+    --tempest-accent-success: #00ff41;   /* Green - Success */
+    --tempest-accent-warning: #ffaa00;   /* Amber - Warning */
+    --tempest-accent-danger: #ff0000;    /* Red - Danger/Alert */
+    --tempest-accent-critical: #ff00ff;  /* Magenta - Critical */
+
+    /* Status indicators */
+    --tempest-status-operational: #00ff41;
+    --tempest-status-degraded: #ffaa00;
+    --tempest-status-offline: #ff0000;
+    --tempest-status-unknown: #888888;
+
+    /* Borders and dividers */
+    --tempest-border-primary: #00ff41;
+    --tempest-border-secondary: #006619;
+    --tempest-border-muted: #003310;
+
+    /* Shadows and glows - Phosphor glow effect */
+    --tempest-glow-primary: 0 0 5px #00ff41, 0 0 10px #00ff41;
+    --tempest-glow-strong: 0 0 10px #00ff41, 0 0 20px #00ff41, 0 0 30px #00ff41;
+    --tempest-glow-danger: 0 0 10px #ff0000, 0 0 20px #ff0000;
+
+    /* Typography */
+    --tempest-font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+    --tempest-font-size-xs: 10px;
+    --tempest-font-size-sm: 12px;
+    --tempest-font-size-md: 14px;
+    --tempest-font-size-lg: 16px;
+    --tempest-font-size-xl: 20px;
+    --tempest-font-size-xxl: 24px;
+
+    /* Spacing */
+    --tempest-space-xs: 4px;
+    --tempest-space-sm: 8px;
+    --tempest-space-md: 16px;
+    --tempest-space-lg: 24px;
+    --tempest-space-xl: 32px;
+}
+
+/* ============================================================================
+ * Base Styles
+ * ========================================================================= */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--tempest-bg-primary);
+    color: var(--tempest-text-primary);
+    font-family: var(--tempest-font-mono);
+    font-size: var(--tempest-font-size-md);
+    line-height: 1.5;
+    overflow-x: hidden;
+}
+
+/* Scanline effect */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.1),
+        rgba(0, 0, 0, 0.1) 1px,
+        transparent 1px,
+        transparent 2px
+    );
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.3;
+}
+
+/* CRT flicker effect */
+@keyframes flicker {
+    0% { opacity: 0.97; }
+    2% { opacity: 1; }
+    4% { opacity: 0.97; }
+    8% { opacity: 1; }
+    70% { opacity: 0.97; }
+    72% { opacity: 1; }
+    100% { opacity: 0.97; }
+}
+
+body {
+    animation: flicker 4s infinite;
+}
+
+/* ============================================================================
+ * Typography
+ * ========================================================================= */
+
+h1, h2, h3, h4, h5, h6 {
+    color: var(--tempest-text-primary);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: var(--tempest-space-md);
+    text-shadow: var(--tempest-glow-primary);
+}
+
+h1 {
+    font-size: var(--tempest-font-size-xxl);
+    border-bottom: 2px solid var(--tempest-border-primary);
+    padding-bottom: var(--tempest-space-sm);
+}
+
+h2 {
+    font-size: var(--tempest-font-size-xl);
+    border-bottom: 1px solid var(--tempest-border-secondary);
+    padding-bottom: var(--tempest-space-xs);
+}
+
+h3 {
+    font-size: var(--tempest-font-size-lg);
+}
+
+a {
+    color: var(--tempest-accent-info);
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+a:hover {
+    color: var(--tempest-text-primary);
+    text-shadow: var(--tempest-glow-primary);
+}
+
+code, pre {
+    font-family: var(--tempest-font-mono);
+    background-color: var(--tempest-bg-secondary);
+    border: 1px solid var(--tempest-border-muted);
+    padding: var(--tempest-space-xs);
+}
+
+pre {
+    padding: var(--tempest-space-md);
+    overflow-x: auto;
+    margin: var(--tempest-space-md) 0;
+}
+
+/* ============================================================================
+ * Layout
+ * ========================================================================= */
+
+.tempest-container {
+    max-width: 1920px;
+    margin: 0 auto;
+    padding: var(--tempest-space-md);
+}
+
+.tempest-header {
+    background-color: var(--tempest-bg-elevated);
+    border-bottom: 2px solid var(--tempest-border-primary);
+    padding: var(--tempest-space-md);
+    margin-bottom: var(--tempest-space-lg);
+    box-shadow: var(--tempest-glow-primary);
+}
+
+.tempest-header-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tempest-header-title h1 {
+    margin: 0;
+    border: none;
+}
+
+.tempest-classification {
+    color: var(--tempest-accent-critical);
+    font-size: var(--tempest-font-size-sm);
+    font-weight: bold;
+    padding: var(--tempest-space-xs) var(--tempest-space-sm);
+    border: 1px solid var(--tempest-accent-critical);
+    text-shadow: var(--tempest-glow-danger);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.tempest-nav {
+    display: flex;
+    gap: var(--tempest-space-md);
+    margin-top: var(--tempest-space-md);
+    flex-wrap: wrap;
+}
+
+.tempest-nav a {
+    padding: var(--tempest-space-sm) var(--tempest-space-md);
+    border: 1px solid var(--tempest-border-secondary);
+    background-color: var(--tempest-bg-secondary);
+    transition: all 0.3s ease;
+}
+
+.tempest-nav a:hover,
+.tempest-nav a.active {
+    border-color: var(--tempest-border-primary);
+    background-color: var(--tempest-bg-tertiary);
+    box-shadow: var(--tempest-glow-primary);
+}
+
+.tempest-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--tempest-space-md);
+    margin: var(--tempest-space-lg) 0;
+}
+
+.tempest-grid-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.tempest-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.tempest-grid-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+/* ============================================================================
+ * Components - Panels
+ * ========================================================================= */
+
+.tempest-panel {
+    background-color: var(--tempest-bg-secondary);
+    border: 1px solid var(--tempest-border-primary);
+    padding: var(--tempest-space-md);
+    margin: var(--tempest-space-md) 0;
+    box-shadow: inset 0 0 10px rgba(0, 255, 65, 0.1);
+}
+
+.tempest-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--tempest-space-md);
+    padding-bottom: var(--tempest-space-sm);
+    border-bottom: 1px solid var(--tempest-border-secondary);
+}
+
+.tempest-panel-title {
+    font-size: var(--tempest-font-size-lg);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.tempest-panel-body {
+    color: var(--tempest-text-secondary);
+}
+
+/* ============================================================================
+ * Components - Status Indicators
+ * ========================================================================= */
+
+.tempest-status {
+    display: inline-block;
+    padding: var(--tempest-space-xs) var(--tempest-space-sm);
+    border: 1px solid;
+    font-size: var(--tempest-font-size-sm);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.tempest-status-operational {
+    color: var(--tempest-status-operational);
+    border-color: var(--tempest-status-operational);
+    background-color: rgba(0, 255, 65, 0.1);
+}
+
+.tempest-status-degraded {
+    color: var(--tempest-status-degraded);
+    border-color: var(--tempest-status-degraded);
+    background-color: rgba(255, 170, 0, 0.1);
+}
+
+.tempest-status-offline {
+    color: var(--tempest-status-offline);
+    border-color: var(--tempest-status-offline);
+    background-color: rgba(255, 0, 0, 0.1);
+}
+
+.tempest-status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: var(--tempest-space-xs);
+    animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.tempest-status-dot.operational {
+    background-color: var(--tempest-status-operational);
+    box-shadow: 0 0 10px var(--tempest-status-operational);
+}
+
+.tempest-status-dot.degraded {
+    background-color: var(--tempest-status-degraded);
+    box-shadow: 0 0 10px var(--tempest-status-degraded);
+}
+
+.tempest-status-dot.offline {
+    background-color: var(--tempest-status-offline);
+    box-shadow: 0 0 10px var(--tempest-status-offline);
+}
+
+/* ============================================================================
+ * Components - Buttons
+ * ========================================================================= */
+
+.tempest-btn {
+    display: inline-block;
+    padding: var(--tempest-space-sm) var(--tempest-space-md);
+    background-color: var(--tempest-bg-elevated);
+    color: var(--tempest-text-primary);
+    border: 1px solid var(--tempest-border-primary);
+    font-family: var(--tempest-font-mono);
+    font-size: var(--tempest-font-size-md);
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    letter-spacing: 1px;
+}
+
+.tempest-btn:hover:not(:disabled) {
+    background-color: var(--tempest-bg-tertiary);
+    box-shadow: var(--tempest-glow-primary);
+    transform: translateY(-2px);
+}
+
+.tempest-btn:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.tempest-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tempest-btn-success {
+    border-color: var(--tempest-accent-success);
+    color: var(--tempest-accent-success);
+}
+
+.tempest-btn-success:hover:not(:disabled) {
+    box-shadow: 0 0 10px var(--tempest-accent-success);
+}
+
+.tempest-btn-warning {
+    border-color: var(--tempest-accent-warning);
+    color: var(--tempest-accent-warning);
+}
+
+.tempest-btn-warning:hover:not(:disabled) {
+    box-shadow: 0 0 10px var(--tempest-accent-warning);
+}
+
+.tempest-btn-danger {
+    border-color: var(--tempest-accent-danger);
+    color: var(--tempest-accent-danger);
+}
+
+.tempest-btn-danger:hover:not(:disabled) {
+    box-shadow: var(--tempest-glow-danger);
+}
+
+.tempest-btn-group {
+    display: flex;
+    gap: var(--tempest-space-sm);
+}
+
+/* ============================================================================
+ * Components - Forms
+ * ========================================================================= */
+
+.tempest-form-group {
+    margin-bottom: var(--tempest-space-md);
+}
+
+.tempest-label {
+    display: block;
+    margin-bottom: var(--tempest-space-xs);
+    color: var(--tempest-text-secondary);
+    text-transform: uppercase;
+    font-size: var(--tempest-font-size-sm);
+    letter-spacing: 1px;
+}
+
+.tempest-input {
+    width: 100%;
+    padding: var(--tempest-space-sm);
+    background-color: var(--tempest-bg-primary);
+    color: var(--tempest-text-primary);
+    border: 1px solid var(--tempest-border-secondary);
+    font-family: var(--tempest-font-mono);
+    font-size: var(--tempest-font-size-md);
+    transition: all 0.3s ease;
+}
+
+.tempest-input:focus {
+    outline: none;
+    border-color: var(--tempest-border-primary);
+    box-shadow: var(--tempest-glow-primary);
+}
+
+.tempest-select {
+    width: 100%;
+    padding: var(--tempest-space-sm);
+    background-color: var(--tempest-bg-primary);
+    color: var(--tempest-text-primary);
+    border: 1px solid var(--tempest-border-secondary);
+    font-family: var(--tempest-font-mono);
+    font-size: var(--tempest-font-size-md);
+    cursor: pointer;
+}
+
+.tempest-select:focus {
+    outline: none;
+    border-color: var(--tempest-border-primary);
+    box-shadow: var(--tempest-glow-primary);
+}
+
+.tempest-checkbox {
+    margin-right: var(--tempest-space-xs);
+    accent-color: var(--tempest-accent-success);
+}
+
+/* ============================================================================
+ * Components - Tables
+ * ========================================================================= */
+
+.tempest-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: var(--tempest-space-md) 0;
+}
+
+.tempest-table th,
+.tempest-table td {
+    padding: var(--tempest-space-sm);
+    text-align: left;
+    border: 1px solid var(--tempest-border-muted);
+}
+
+.tempest-table th {
+    background-color: var(--tempest-bg-tertiary);
+    color: var(--tempest-text-primary);
+    text-transform: uppercase;
+    font-size: var(--tempest-font-size-sm);
+    letter-spacing: 1px;
+}
+
+.tempest-table tr:hover {
+    background-color: var(--tempest-bg-secondary);
+}
+
+/* ============================================================================
+ * Components - Metrics
+ * ========================================================================= */
+
+.tempest-metric {
+    text-align: center;
+    padding: var(--tempest-space-md);
+}
+
+.tempest-metric-value {
+    font-size: var(--tempest-font-size-xxl);
+    font-weight: bold;
+    color: var(--tempest-text-primary);
+    text-shadow: var(--tempest-glow-primary);
+    display: block;
+    margin-bottom: var(--tempest-space-xs);
+}
+
+.tempest-metric-label {
+    font-size: var(--tempest-font-size-sm);
+    color: var(--tempest-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* ============================================================================
+ * Components - Progress
+ * ========================================================================= */
+
+.tempest-progress {
+    width: 100%;
+    height: 20px;
+    background-color: var(--tempest-bg-primary);
+    border: 1px solid var(--tempest-border-secondary);
+    overflow: hidden;
+}
+
+.tempest-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg,
+        var(--tempest-accent-success),
+        var(--tempest-text-primary)
+    );
+    transition: width 0.5s ease;
+    box-shadow: var(--tempest-glow-primary);
+}
+
+/* ============================================================================
+ * Components - Terminal
+ * ========================================================================= */
+
+.tempest-terminal {
+    background-color: var(--tempest-bg-primary);
+    border: 1px solid var(--tempest-border-primary);
+    padding: var(--tempest-space-md);
+    font-family: var(--tempest-font-mono);
+    font-size: var(--tempest-font-size-sm);
+    height: 300px;
+    overflow-y: auto;
+    box-shadow: inset var(--tempest-glow-primary);
+}
+
+.tempest-terminal-line {
+    margin-bottom: var(--tempest-space-xs);
+}
+
+.tempest-terminal-prompt {
+    color: var(--tempest-accent-success);
+}
+
+.tempest-terminal-output {
+    color: var(--tempest-text-secondary);
+}
+
+.tempest-terminal-error {
+    color: var(--tempest-accent-danger);
+}
+
+/* ============================================================================
+ * Components - Alerts
+ * ========================================================================= */
+
+.tempest-alert {
+    padding: var(--tempest-space-md);
+    border: 1px solid;
+    margin: var(--tempest-space-md) 0;
+    font-size: var(--tempest-font-size-md);
+}
+
+.tempest-alert-info {
+    border-color: var(--tempest-accent-info);
+    background-color: rgba(0, 255, 255, 0.1);
+    color: var(--tempest-accent-info);
+}
+
+.tempest-alert-success {
+    border-color: var(--tempest-accent-success);
+    background-color: rgba(0, 255, 65, 0.1);
+    color: var(--tempest-accent-success);
+}
+
+.tempest-alert-warning {
+    border-color: var(--tempest-accent-warning);
+    background-color: rgba(255, 170, 0, 0.1);
+    color: var(--tempest-accent-warning);
+}
+
+.tempest-alert-danger {
+    border-color: var(--tempest-accent-danger);
+    background-color: rgba(255, 0, 0, 0.1);
+    color: var(--tempest-accent-danger);
+}
+
+/* ============================================================================
+ * Utilities
+ * ========================================================================= */
+
+.tempest-text-center { text-align: center; }
+.tempest-text-right { text-align: right; }
+.tempest-text-left { text-align: left; }
+
+.tempest-mt-xs { margin-top: var(--tempest-space-xs); }
+.tempest-mt-sm { margin-top: var(--tempest-space-sm); }
+.tempest-mt-md { margin-top: var(--tempest-space-md); }
+.tempest-mt-lg { margin-top: var(--tempest-space-lg); }
+
+.tempest-mb-xs { margin-bottom: var(--tempest-space-xs); }
+.tempest-mb-sm { margin-bottom: var(--tempest-space-sm); }
+.tempest-mb-md { margin-bottom: var(--tempest-space-md); }
+.tempest-mb-lg { margin-bottom: var(--tempest-space-lg); }
+
+.tempest-hidden { display: none; }
+.tempest-block { display: block; }
+.tempest-inline { display: inline; }
+.tempest-flex { display: flex; }
+
+/* ============================================================================
+ * Responsive
+ * ========================================================================= */
+
+@media (max-width: 768px) {
+    .tempest-grid,
+    .tempest-grid-2,
+    .tempest-grid-3,
+    .tempest-grid-4 {
+        grid-template-columns: 1fr;
+    }
+
+    .tempest-header-title {
+        flex-direction: column;
+        gap: var(--tempest-space-sm);
+    }
+
+    .tempest-nav {
+        flex-direction: column;
+    }
+}
+
+/* ============================================================================
+ * Scrollbar
+ * ========================================================================= */
+
+::-webkit-scrollbar {
+    width: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--tempest-bg-primary);
+    border: 1px solid var(--tempest-border-muted);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--tempest-border-secondary);
+    border: 1px solid var(--tempest-border-primary);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--tempest-border-primary);
+    box-shadow: var(--tempest-glow-primary);
+}

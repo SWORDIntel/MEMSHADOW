@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEMSHADOW | Self-Modification Engine</title>
+    <link rel="stylesheet" href="/static/css/tempest-class-c.css">
+</head>
+<body>
+    <div class="tempest-header">
+        <div class="tempest-header-title">
+            <h1>◉ MEMSHADOW | SELF-MODIFICATION ENGINE</h1>
+            <div class="tempest-classification">TEMPEST CLASS C</div>
+        </div>
+        <nav class="tempest-nav">
+            <a href="/">DASHBOARD</a>
+            <a href="/federated">FEDERATED LEARNING</a>
+            <a href="/meta-learning">META-LEARNING</a>
+            <a href="/consciousness">CONSCIOUSNESS</a>
+            <a href="/self-modifying" class="active">SELF-MODIFICATION</a>
+        </nav>
+    </div>
+
+    <div class="tempest-container">
+        <div class="tempest-alert tempest-alert-danger">
+            <strong>⚠️ CRITICAL SAFETY WARNING ⚠️</strong><br>
+            Self-modifying code is inherently risky. This system includes multiple safety measures but should be used with extreme caution.
+            Default safety level is READ_ONLY with auto-apply DISABLED.
+        </div>
+
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ SAFETY CONFIGURATION</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-form-group">
+                    <label class="tempest-label">Safety Level</label>
+                    <select class="tempest-select" id="safety-level">
+                        <option value="read_only" selected>READ_ONLY (No modifications)</option>
+                        <option value="documentation">DOCUMENTATION (Docs/comments only)</option>
+                        <option value="low_risk">LOW_RISK (Safe changes only)</option>
+                        <option value="medium_risk">MEDIUM_RISK (Moderate changes)</option>
+                        <option value="full_access">FULL_ACCESS (All changes - DANGEROUS)</option>
+                    </select>
+                </div>
+
+                <div class="tempest-form-group">
+                    <label>
+                        <input type="checkbox" class="tempest-checkbox" id="auto-apply">
+                        Enable Auto-Apply (automatically apply safe improvements)
+                    </label>
+                </div>
+
+                <div class="tempest-form-group">
+                    <label>
+                        <input type="checkbox" class="tempest-checkbox" id="require-tests" checked disabled>
+                        Require Tests (always enabled for safety)
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ CODE INTROSPECTION</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <p>AST-based static analysis without code execution.</p>
+                <ul style="color: var(--tempest-text-secondary); list-style-position: inside;">
+                    <li>Cyclomatic & cognitive complexity calculation</li>
+                    <li>Nesting depth analysis</li>
+                    <li>Type hint and docstring detection</li>
+                    <li>Quality scoring and bottleneck identification</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ IMPROVEMENT CATEGORIES</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-grid tempest-grid-2">
+                    <div>
+                        <ul style="color: var(--tempest-text-secondary); list-style-position: inside;">
+                            <li>Performance Optimization</li>
+                            <li>Readability Improvement</li>
+                            <li>Maintainability Enhancement</li>
+                            <li>Security Fixes</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <ul style="color: var(--tempest-text-secondary); list-style-position: inside;">
+                            <li>Bug Fixes</li>
+                            <li>Refactoring</li>
+                            <li>Testing</li>
+                            <li>Documentation</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2>◉ SAFETY PROTOCOL</h2>
+            </div>
+            <div class="tempest-panel-body">
+                <ol style="color: var(--tempest-text-secondary); list-style-position: inside;">
+                    <li><strong>BACKUP:</strong> Automatic backup before all modifications</li>
+                    <li><strong>APPLY:</strong> Write modified code</li>
+                    <li><strong>TEST:</strong> Run comprehensive tests (80% line / 70% branch coverage required)</li>
+                    <li><strong>COMMIT (if success) or ROLLBACK (if failure):</strong> Automatic rollback on test failure</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/memshadow.js"></script>
+</body>
+</html>

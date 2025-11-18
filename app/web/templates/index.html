@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>MEMSHADOW | Command & Control</title>
+    <link rel="stylesheet" href="/static/css/tempest-class-c.css">
+</head>
+<body>
+    <div class="tempest-header">
+        <div class="tempest-header-title">
+            <h1>◉ MEMSHADOW | ADVANCED MEMORY SYSTEM</h1>
+            <div class="tempest-classification">TEMPEST CLASS C</div>
+        </div>
+        <nav class="tempest-nav">
+            <a href="/" class="active">DASHBOARD</a>
+            <a href="/federated">FEDERATED LEARNING</a>
+            <a href="/meta-learning">META-LEARNING</a>
+            <a href="/consciousness">CONSCIOUSNESS</a>
+            <a href="/self-modifying">SELF-MODIFICATION</a>
+            <a href="#config" onclick="showConfigPanel()">CONFIGURATION</a>
+        </nav>
+    </div>
+
+    <div class="tempest-container">
+        <!-- System Status Overview -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2 class="tempest-panel-title">◉ SYSTEM STATUS</h2>
+                <div>
+                    <span class="tempest-status-dot operational"></span>
+                    <span id="system-status">OPERATIONAL</span>
+                </div>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-grid tempest-grid-4">
+                    <div class="tempest-metric">
+                        <span class="tempest-metric-value" id="uptime">--:--:--</span>
+                        <span class="tempest-metric-label">Uptime</span>
+                    </div>
+                    <div class="tempest-metric">
+                        <span class="tempest-metric-value" id="version">1.0.0</span>
+                        <span class="tempest-metric-label">Version</span>
+                    </div>
+                    <div class="tempest-metric">
+                        <span class="tempest-metric-value" id="timestamp">--</span>
+                        <span class="tempest-metric-label">System Time</span>
+                    </div>
+                    <div class="tempest-metric">
+                        <span class="tempest-metric-value" id="active-components">0/4</span>
+                        <span class="tempest-metric-label">Active Components</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Component Status Grid -->
+        <div class="tempest-grid tempest-grid-2">
+            <!-- Federated Learning Status -->
+            <div class="tempest-panel">
+                <div class="tempest-panel-header">
+                    <h3>FEDERATED LEARNING</h3>
+                    <span class="tempest-status" id="federated-status">OFFLINE</span>
+                </div>
+                <div class="tempest-panel-body">
+                    <table class="tempest-table">
+                        <tr>
+                            <td>Status:</td>
+                            <td id="federated-status-detail">Not Running</td>
+                        </tr>
+                        <tr>
+                            <td>Connected Peers:</td>
+                            <td id="federated-peers">0</td>
+                        </tr>
+                        <tr>
+                            <td>Privacy Budget:</td>
+                            <td id="federated-privacy">N/A</td>
+                        </tr>
+                        <tr>
+                            <td>Total Updates:</td>
+                            <td id="federated-updates">0</td>
+                        </tr>
+                    </table>
+                    <div class="tempest-btn-group tempest-mt-md">
+                        <button class="tempest-btn tempest-btn-success" onclick="startFederated()">START</button>
+                        <button class="tempest-btn tempest-btn-danger" onclick="stopFederated()">STOP</button>
+                        <button class="tempest-btn" onclick="window.location.href='/federated'">MANAGE</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Meta-Learning Status -->
+            <div class="tempest-panel">
+                <div class="tempest-panel-header">
+                    <h3>META-LEARNING SYSTEM</h3>
+                    <span class="tempest-status tempest-status-operational" id="meta-status">READY</span>
+                </div>
+                <div class="tempest-panel-body">
+                    <table class="tempest-table">
+                        <tr>
+                            <td>MAML Adapter:</td>
+                            <td id="maml-status">Ready</td>
+                        </tr>
+                        <tr>
+                            <td>Tasks Adapted:</td>
+                            <td id="maml-tasks">0</td>
+                        </tr>
+                        <tr>
+                            <td>Performance Tracker:</td>
+                            <td id="performance-status">Active</td>
+                        </tr>
+                        <tr>
+                            <td>Pending Proposals:</td>
+                            <td id="meta-proposals">0</td>
+                        </tr>
+                    </table>
+                    <div class="tempest-btn-group tempest-mt-md">
+                        <button class="tempest-btn tempest-btn-success" onclick="window.location.href='/meta-learning'">MANAGE</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Consciousness Status -->
+            <div class="tempest-panel">
+                <div class="tempest-panel-header">
+                    <h3>CONSCIOUSNESS ARCHITECTURE</h3>
+                    <span class="tempest-status" id="consciousness-status">OFFLINE</span>
+                </div>
+                <div class="tempest-panel-body">
+                    <table class="tempest-table">
+                        <tr>
+                            <td>Integrator Status:</td>
+                            <td id="consciousness-status-detail">Not Running</td>
+                        </tr>
+                        <tr>
+                            <td>Workspace Utilization:</td>
+                            <td id="workspace-utilization">0%</td>
+                        </tr>
+                        <tr>
+                            <td>Decisions Made:</td>
+                            <td id="consciousness-decisions">0</td>
+                        </tr>
+                        <tr>
+                            <td>Processing Mode:</td>
+                            <td id="processing-mode">N/A</td>
+                        </tr>
+                    </table>
+                    <div class="tempest-btn-group tempest-mt-md">
+                        <button class="tempest-btn tempest-btn-success" onclick="startConsciousness()">START</button>
+                        <button class="tempest-btn tempest-btn-danger" onclick="stopConsciousness()">STOP</button>
+                        <button class="tempest-btn" onclick="window.location.href='/consciousness'">MANAGE</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Self-Modifying Status -->
+            <div class="tempest-panel">
+                <div class="tempest-panel-header">
+                    <h3>SELF-MODIFICATION ENGINE</h3>
+                    <span class="tempest-status" id="self-mod-status">OFFLINE</span>
+                </div>
+                <div class="tempest-panel-body">
+                    <table class="tempest-table">
+                        <tr>
+                            <td>Engine Status:</td>
+                            <td id="self-mod-status-detail">Not Running</td>
+                        </tr>
+                        <tr>
+                            <td>Safety Level:</td>
+                            <td id="self-mod-safety">READ_ONLY</td>
+                        </tr>
+                        <tr>
+                            <td>Modifications:</td>
+                            <td id="self-mod-count">0</td>
+                        </tr>
+                        <tr>
+                            <td>Success Rate:</td>
+                            <td id="self-mod-success">N/A</td>
+                        </tr>
+                    </table>
+                    <div class="tempest-btn-group tempest-mt-md">
+                        <button class="tempest-btn tempest-btn-warning" onclick="startSelfModifying()">START</button>
+                        <button class="tempest-btn tempest-btn-danger" onclick="stopSelfModifying()">STOP</button>
+                        <button class="tempest-btn" onclick="window.location.href='/self-modifying'">MANAGE</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Logs/Terminal -->
+        <div class="tempest-panel">
+            <div class="tempest-panel-header">
+                <h2 class="tempest-panel-title">◉ SYSTEM LOGS</h2>
+                <button class="tempest-btn" onclick="clearLogs()">CLEAR</button>
+            </div>
+            <div class="tempest-panel-body">
+                <div class="tempest-terminal" id="system-logs">
+                    <div class="tempest-terminal-line">
+                        <span class="tempest-terminal-prompt">[SYSTEM]</span>
+                        <span class="tempest-terminal-output">MEMSHADOW Web Interface initialized</span>
+                    </div>
+                    <div class="tempest-terminal-line">
+                        <span class="tempest-terminal-prompt">[INFO]</span>
+                        <span class="tempest-terminal-output">Awaiting commands...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration Modal (Hidden by default) -->
+    <div id="config-modal" class="tempest-hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; overflow-y: auto;">
+        <div class="tempest-container" style="margin-top: 2rem;">
+            <div class="tempest-panel">
+                <div class="tempest-panel-header">
+                    <h2>SYSTEM CONFIGURATION</h2>
+                    <button class="tempest-btn" onclick="hideConfigPanel()">CLOSE</button>
+                </div>
+                <div class="tempest-panel-body">
+                    <div id="config-content">
+                        Loading configuration...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="/static/js/memshadow.js"></script>
+    <script>
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            updateSystemStatus();
+            updateComponentStats();
+
+            // Refresh every second
+            setInterval(updateSystemStatus, 1000);
+            setInterval(updateComponentStats, 5000);
+        });
+
+        async function updateSystemStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Update uptime
+                const uptime = formatUptime(data.uptime_seconds);
+                document.getElementById('uptime').textContent = uptime;
+
+                // Update timestamp
+                const timestamp = new Date(data.timestamp).toLocaleTimeString();
+                document.getElementById('timestamp').textContent = timestamp;
+
+                // Update version
+                document.getElementById('version').textContent = data.version;
+
+            } catch (error) {
+                logError('Failed to update system status: ' + error.message);
+            }
+        }
+
+        async function updateComponentStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+
+                let activeCount = 0;
+
+                // Update federated status
+                if (data.federated && data.federated.status !== 'not_running') {
+                    document.getElementById('federated-status').textContent = 'OPERATIONAL';
+                    document.getElementById('federated-status').className = 'tempest-status tempest-status-operational';
+                    document.getElementById('federated-status-detail').textContent = 'Running';
+                    document.getElementById('federated-peers').textContent = data.federated.peer_count || 0;
+                    activeCount++;
+                }
+
+                // Update consciousness status
+                if (data.consciousness && data.consciousness.status !== 'not_running') {
+                    document.getElementById('consciousness-status').textContent = 'OPERATIONAL';
+                    document.getElementById('consciousness-status').className = 'tempest-status tempest-status-operational';
+                    document.getElementById('consciousness-status-detail').textContent = 'Running';
+                    document.getElementById('workspace-utilization').textContent =
+                        (data.consciousness.workspace?.utilization_percent || 0).toFixed(1) + '%';
+                    document.getElementById('consciousness-decisions').textContent =
+                        data.consciousness.decisions_made || 0;
+                    document.getElementById('processing-mode').textContent =
+                        (data.consciousness.processing_mode || 'N/A').toUpperCase();
+                    activeCount++;
+                }
+
+                // Update self-modifying status
+                if (data.self_modifying && data.self_modifying.status !== 'not_running') {
+                    document.getElementById('self-mod-status').textContent = 'OPERATIONAL';
+                    document.getElementById('self-mod-status').className = 'tempest-status tempest-status-operational';
+                    document.getElementById('self-mod-status-detail').textContent = 'Running';
+                    document.getElementById('self-mod-safety').textContent =
+                        (data.self_modifying.safety_level || 'READ_ONLY').toUpperCase();
+                    document.getElementById('self-mod-count').textContent =
+                        data.self_modifying.modifications?.total_modifications || 0;
+                    document.getElementById('self-mod-success').textContent =
+                        (data.self_modifying.modifications?.success_rate_percent || 0).toFixed(1) + '%';
+                    activeCount++;
+                }
+
+                // Update active components count
+                document.getElementById('active-components').textContent = activeCount + '/4';
+
+            } catch (error) {
+                logError('Failed to update component stats: ' + error.message);
+            }
+        }
+
+        async function startFederated() {
+            try {
+                logInfo('Starting federated coordinator...');
+                const response = await fetch('/api/federated/start', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    logSuccess('Federated coordinator started successfully');
+                    updateComponentStats();
+                } else {
+                    logError('Failed to start federated: ' + data.error);
+                }
+            } catch (error) {
+                logError('Error starting federated: ' + error.message);
+            }
+        }
+
+        async function stopFederated() {
+            try {
+                logInfo('Stopping federated coordinator...');
+                const response = await fetch('/api/federated/stop', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    logSuccess('Federated coordinator stopped');
+                    updateComponentStats();
+                } else {
+                    logError('Failed to stop federated: ' + data.error);
+                }
+            } catch (error) {
+                logError('Error stopping federated: ' + error.message);
+            }
+        }
+
+        async function startConsciousness() {
+            try {
+                logInfo('Starting consciousness integrator...');
+                const response = await fetch('/api/consciousness/start', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    logSuccess('Consciousness integrator started successfully');
+                    updateComponentStats();
+                } else {
+                    logError('Failed to start consciousness: ' + data.error);
+                }
+            } catch (error) {
+                logError('Error starting consciousness: ' + error.message);
+            }
+        }
+
+        async function stopConsciousness() {
+            try {
+                logInfo('Stopping consciousness integrator...');
+                const response = await fetch('/api/consciousness/stop', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    logSuccess('Consciousness integrator stopped');
+                    updateComponentStats();
+                } else {
+                    logError('Failed to stop consciousness: ' + data.error);
+                }
+            } catch (error) {
+                logError('Error stopping consciousness: ' + error.message);
+            }
+        }
+
+        async function startSelfModifying() {
+            if (!confirm('WARNING: Starting self-modification engine. Ensure safety level is appropriate. Continue?')) {
+                return;
+            }
+
+            try {
+                logInfo('Starting self-modification engine...');
+                const response = await fetch('/api/self-modifying/start', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    logSuccess('Self-modification engine started (Safety: ' + data.safety_level.toUpperCase() + ')');
+                    updateComponentStats();
+                } else {
+                    logError('Failed to start self-modifying: ' + data.error);
+                }
+            } catch (error) {
+                logError('Error starting self-modifying: ' + error.message);
+            }
+        }
+
+        async function stopSelfModifying() {
+            try {
+                logInfo('Stopping self-modification engine...');
+                const response = await fetch('/api/self-modifying/stop', { method: 'POST' });
+                const data = await response.json();
+
+                if (response.ok) {
+                    logSuccess('Self-modification engine stopped');
+                    updateComponentStats();
+                } else {
+                    logError('Failed to stop self-modifying: ' + data.error);
+                }
+            } catch (error) {
+                logError('Error stopping self-modifying: ' + error.message);
+            }
+        }
+
+        async function showConfigPanel() {
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+
+                const configHtml = generateConfigHTML(config);
+                document.getElementById('config-content').innerHTML = configHtml;
+                document.getElementById('config-modal').classList.remove('tempest-hidden');
+            } catch (error) {
+                logError('Failed to load configuration: ' + error.message);
+            }
+        }
+
+        function hideConfigPanel() {
+            document.getElementById('config-modal').classList.add('tempest-hidden');
+        }
+
+        function generateConfigHTML(config) {
+            let html = '';
+
+            for (const [section, values] of Object.entries(config)) {
+                html += `<div class="tempest-panel" style="margin-bottom: 1rem;">`;
+                html += `<h3>${section.toUpperCase()}</h3>`;
+                html += `<table class="tempest-table">`;
+
+                for (const [key, value] of Object.entries(values)) {
+                    html += `<tr>`;
+                    html += `<td>${key}:</td>`;
+                    html += `<td>${JSON.stringify(value)}</td>`;
+                    html += `</tr>`;
+                }
+
+                html += `</table>`;
+                html += `</div>`;
+            }
+
+            return html;
+        }
+
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+
+            return `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
+        }
+
+        function pad(num) {
+            return num.toString().padStart(2, '0');
+        }
+
+        function clearLogs() {
+            document.getElementById('system-logs').innerHTML = '';
+            logInfo('Logs cleared');
+        }
+
+        function logInfo(message) {
+            addLog('INFO', message, 'tempest-terminal-output');
+        }
+
+        function logSuccess(message) {
+            addLog('SUCCESS', message, 'tempest-terminal-output');
+        }
+
+        function logError(message) {
+            addLog('ERROR', message, 'tempest-terminal-error');
+        }
+
+        function addLog(level, message, className) {
+            const logs = document.getElementById('system-logs');
+            const timestamp = new Date().toLocaleTimeString();
+            const line = document.createElement('div');
+            line.className = 'tempest-terminal-line';
+
+            line.innerHTML = `
+                <span class="tempest-terminal-prompt">[${timestamp}] [${level}]</span>
+                <span class="${className}">${message}</span>
+            `;
+
+            logs.appendChild(line);
+            logs.scrollTop = logs.scrollHeight;
+
+            // Keep only last 100 lines
+            while (logs.children.length > 100) {
+                logs.removeChild(logs.firstChild);
+            }
+        }
+    </script>
+</body>
+</html>
