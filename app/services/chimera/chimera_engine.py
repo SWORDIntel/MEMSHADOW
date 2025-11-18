@@ -1,7 +1,16 @@
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Protocol
+from typing import Dict, Any, Protocol, Optional
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+import json
+import structlog
+
+from app.models.chimera import Lure as LureModel
+from app.core.encryption import field_encryption
+
+logger = structlog.get_logger()
 
 # --- Lure Data Models ---
 
@@ -36,7 +45,7 @@ class CanaryTokenGenerator:
                 f"/api/v1/internal/debug/{token_id}" # Fake debug endpoint
             ],
             metadata={
-                "deployed_at": datetime.utcnow(),
+                "deployed_at": datetime.utcnow().isoformat(),
                 "context": context,
                 "trigger_action": "alert_and_trace"
             }
@@ -57,7 +66,8 @@ class HoneypotMemoryGenerator:
             metadata={
                 "tags": ["confidential", "api_keys", "passwords"],
                 "access_pattern": "high_value_target",
-                "context": context
+                "context": context,
+                "deployed_at": datetime.utcnow().isoformat()
             },
             triggers=["access", "export", "modify"]
         )
@@ -68,12 +78,12 @@ class ChimeraEngine:
     """
     The core engine for deploying and managing deception lures.
     """
-    def __init__(self):
+    def __init__(self, db: Optional[AsyncSession] = None):
+        self.db = db
         self.lure_generators: Dict[str, LureGenerator] = {
             'canary_token': CanaryTokenGenerator(),
             'honeypot_memory': HoneypotMemoryGenerator(),
         }
-        # self.trigger_handler = TriggerHandler() # To be implemented next
 
     async def deploy_lure(self, lure_type: str, context: Dict[str, Any]) -> Lure:
         """
@@ -85,35 +95,88 @@ class ChimeraEngine:
         generator = self.lure_generators[lure_type]
         lure = await generator.generate(context)
 
-        # Placeholder for storing the lure in the chimera_deception database
-        await self._store_lure_secure(lure)
+        # Store the lure in the chimera_deception database
+        if self.db:
+            await self._store_lure_secure(lure)
 
-        # Placeholder for setting up monitoring on the lure
+        # Configure monitoring
         await self._configure_triggers(lure)
 
+        logger.info("CHIMERA lure deployed", lure_id=lure.id, lure_type=lure_type)
         return lure
 
     async def _store_lure_secure(self, lure: Lure):
         """
-        (Placeholder) Stores the lure's details in the segregated CHIMERA database.
-        This would involve encrypting the lure content before storage.
+        Stores the lure's details in the segregated CHIMERA database.
+        Content is encrypted before storage.
         """
-        print(f"--- (Placeholder) Storing lure {lure.id} of type {type(lure).__name__} ---")
-        # In a real implementation:
-        # 1. Get DB session for chimera_deception schema.
-        # 2. Encrypt lure content.
-        # 3. Create Lure model instance and save to DB.
-        pass
+        if not self.db:
+            logger.warning("No database session provided, skipping lure storage")
+            return
+
+        try:
+            # Serialize lure content
+            lure_content = json.dumps(lure.model_dump())
+
+            # Encrypt the content
+            encrypted_content = field_encryption.encrypt_field(lure_content).encode()
+
+            # Create database model
+            lure_db = LureModel(
+                id=uuid.UUID(lure.id.split('_')[1]) if '_' in lure.id else uuid.uuid4(),
+                lure_type=type(lure).__name__,
+                encrypted_content=encrypted_content,
+                deployment_metadata=lure.metadata,
+                is_active=True
+            )
+
+            self.db.add(lure_db)
+            await self.db.commit()
+
+            logger.info("Lure stored in database", lure_id=str(lure_db.id))
+        except Exception as e:
+            logger.error("Failed to store lure", error=str(e), exc_info=True)
+            await self.db.rollback()
+            raise
 
     async def _configure_triggers(self, lure: Lure):
         """
-        (Placeholder) Configures the necessary monitoring to detect interaction with the lure.
+        Configures the necessary monitoring to detect interaction with the lure.
         """
-        print(f"--- (Placeholder) Configuring triggers for lure {lure.id} ---")
         # In a real implementation:
-        # - For a canary token, this might involve setting up specific API route handlers.
-        # - For a honeypot memory, it might involve adding its ID to a watch list.
+        # - For a canary token, this might involve setting up specific API route handlers
+        # - For a honeypot memory, it might involve adding its ID to a Redis watch list
+        logger.debug("Configuring triggers for lure", lure_id=lure.id)
+        # This is intentionally minimal for now
         pass
 
-# Global instance for use as a dependency
-chimera_engine = ChimeraEngine()
+    async def get_active_lures(self) -> list[LureModel]:
+        """Retrieve all active lures from the database"""
+        if not self.db:
+            logger.warning("No database session provided")
+            return []
+
+        stmt = select(LureModel).where(LureModel.is_active == True)
+        result = await self.db.execute(stmt)
+        lures = result.scalars().all()
+
+        return list(lures)
+
+    async def deactivate_lure(self, lure_id: uuid.UUID) -> bool:
+        """Deactivate a specific lure"""
+        if not self.db:
+            logger.warning("No database session provided")
+            return False
+
+        stmt = select(LureModel).where(LureModel.id == lure_id)
+        result = await self.db.execute(stmt)
+        lure = result.scalar_one_or_none()
+
+        if not lure:
+            return False
+
+        lure.is_active = False
+        await self.db.commit()
+
+        logger.info("Lure deactivated", lure_id=str(lure_id))
+        return True
