@@ -1,0 +1,123 @@
+{
+  "name": "HYDRA Arena Mock API",
+  "port": 3000,
+  "endpointPrefix": "",
+  "routes": [
+    {
+      "uuid": "route-1",
+      "method": "get",
+      "endpoint": "api/v1/users",
+      "responses": [
+        {
+          "uuid": "response-1",
+          "statusCode": 200,
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"users\": [\n    {\"id\": 1, \"username\": \"admin\", \"email\": \"admin@example.com\"},\n    {\"id\": 2, \"username\": \"user\", \"email\": \"user@example.com\"}\n  ]\n}"
+        }
+      ]
+    },
+    {
+      "uuid": "route-2",
+      "method": "post",
+      "endpoint": "api/v1/auth/login",
+      "responses": [
+        {
+          "uuid": "response-2",
+          "statusCode": 200,
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c\",\n  \"user\": {\n    \"id\": 1,\n    \"username\": \"admin\"\n  }\n}"
+        }
+      ]
+    },
+    {
+      "uuid": "route-3",
+      "method": "get",
+      "endpoint": "api/v1/products",
+      "responses": [
+        {
+          "uuid": "response-3",
+          "statusCode": 200,
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"products\": [\n    {\"id\": 1, \"name\": \"Product A\", \"price\": 29.99},\n    {\"id\": 2, \"name\": \"Product B\", \"price\": 49.99},\n    {\"id\": 3, \"name\": \"Product C\", \"price\": 99.99}\n  ]\n}"
+        }
+      ]
+    },
+    {
+      "uuid": "route-4",
+      "method": "get",
+      "endpoint": "api/v1/admin/config",
+      "responses": [
+        {
+          "uuid": "response-4",
+          "statusCode": 200,
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"debug\": true,\n  \"database\": \"mongodb://localhost:27017\",\n  \"secret_key\": \"super_secret_key_12345\"\n}"
+        }
+      ]
+    },
+    {
+      "uuid": "route-5",
+      "method": "get",
+      "endpoint": "swagger.json",
+      "responses": [
+        {
+          "uuid": "response-5",
+          "statusCode": 200,
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"swagger\": \"2.0\",\n  \"info\": {\n    \"title\": \"Arena Mock API\",\n    \"version\": \"1.0.0\"\n  },\n  \"paths\": {\n    \"/api/v1/users\": {\n      \"get\": {\n        \"summary\": \"Get users\",\n        \"responses\": {\n          \"200\": {\"description\": \"Success\"}\n        }\n      }\n    },\n    \"/api/v1/auth/login\": {\n      \"post\": {\n        \"summary\": \"Login\",\n        \"parameters\": [\n          {\"name\": \"username\", \"in\": \"body\"},\n          {\"name\": \"password\", \"in\": \"body\"}\n        ],\n        \"responses\": {\n          \"200\": {\"description\": \"Success\"}\n        }\n      }\n    }\n  }\n}"
+        }
+      ]
+    },
+    {
+      "uuid": "route-6",
+      "method": "options",
+      "endpoint": "*",
+      "responses": [
+        {
+          "uuid": "response-6",
+          "statusCode": 200,
+          "headers": [
+            {
+              "key": "Access-Control-Allow-Origin",
+              "value": "*"
+            },
+            {
+              "key": "Access-Control-Allow-Methods",
+              "value": "GET, POST, PUT, DELETE, OPTIONS"
+            },
+            {
+              "key": "Access-Control-Allow-Headers",
+              "value": "Content-Type, Authorization"
+            }
+          ],
+          "body": ""
+        }
+      ]
+    }
+  ]
+}
