@@ -1,0 +1,13 @@
+---
+# MEMSHADOW Namespace
+# Classification: UNCLASSIFIED
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: memshadow
+  labels:
+    name: memshadow
+    classification: unclassified
+    app.kubernetes.io/name: memshadow
+    app.kubernetes.io/component: infrastructure

@@ -1,0 +1,267 @@
+{
+  "dashboard": {
+    "title": "MEMSHADOW Overview",
+    "tags": ["memshadow", "overview"],
+    "timezone": "utc",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Classification Banner",
+        "type": "text",
+        "gridPos": {"h": 2, "w": 24, "x": 0, "y": 0},
+        "options": {
+          "mode": "markdown",
+          "content": "# **UNCLASSIFIED** | MEMSHADOW v2.1 | Offensive Security Platform\n## For Authorized Security Testing Only"
+        }
+      },
+      {
+        "id": 2,
+        "title": "System Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 2},
+        "targets": [
+          {
+            "expr": "up{job=\"memshadow\"}",
+            "legendFormat": "MEMSHADOW",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "background",
+          "textMode": "value_and_name"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": "1", "text": "UP", "color": "green"},
+              {"type": "value", "value": "0", "text": "DOWN", "color": "red"}
+            ]
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active C2 Sessions",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 2},
+        "targets": [
+          {
+            "expr": "memshadow_c2_sessions_active",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value",
+          "textMode": "value_and_name"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "gray"},
+                {"value": 1, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Active Missions",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 2},
+        "targets": [
+          {
+            "expr": "memshadow_missions_active",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Vulnerabilities Found (24h)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 2},
+        "targets": [
+          {
+            "expr": "increase(memshadow_vulnerabilities_found_total[24h])",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 10, "color": "yellow"},
+                {"value": 50, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "API Request Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "rate(memshadow_http_requests_total[5m])",
+            "legendFormat": "{{method}} {{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "reqps", "label": "Requests/sec"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "API Latency (p95)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(memshadow_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{method}} {{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Latency"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "C2 Sessions Over Time",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+        "targets": [
+          {
+            "expr": "memshadow_c2_sessions_active",
+            "legendFormat": "Active Sessions",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(memshadow_c2_sessions_total[5m])",
+            "legendFormat": "New Sessions/sec",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Sessions"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Data Exfiltration Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+        "targets": [
+          {
+            "expr": "rate(memshadow_c2_data_exfiltrated_bytes_total[5m])",
+            "legendFormat": "Bytes/sec",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "Bps", "label": "Bandwidth"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Mission Success Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+        "targets": [
+          {
+            "expr": "rate(memshadow_missions_total{status=\"completed\"}[10m]) / rate(memshadow_missions_total[10m]) * 100",
+            "legendFormat": "Success Rate %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "Success Rate", "max": 100},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 11,
+        "title": "SWARM Agent Task Queues",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+        "targets": [
+          {
+            "expr": "memshadow_swarm_tasks_queued",
+            "legendFormat": "{{agent_type}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Queued Tasks"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+        "targets": [
+          {
+            "expr": "memshadow_system_memory_usage_bytes / 1024 / 1024 / 1024",
+            "legendFormat": "Memory (GB)",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "decgbytes", "label": "Memory"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 13,
+        "title": "CPU Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+        "targets": [
+          {
+            "expr": "memshadow_system_cpu_usage_percent",
+            "legendFormat": "CPU %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "CPU Usage", "max": 100},
+          {"format": "short"}
+        ]
+      }
+    ]
+  }
+}

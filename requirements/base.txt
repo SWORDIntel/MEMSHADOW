@@ -36,3 +36,37 @@ celery[redis]
 
 # Monitoring
 prometheus-fastapi-instrumentator
+
+# TUI
+rich>=13.0.0
+
+# Document Processing
+pymupdf  # PDF processing with text and image extraction
+python-docx  # Word document processing
+python-pptx  # PowerPoint processing
+openpyxl  # Excel processing
+python-magic  # File type detection
+pytesseract  # OCR capabilities
+Pillow  # Image processing
+beautifulsoup4  # HTML processing
+lxml  # XML processing
+markdown  # Markdown processing
+pypandoc  # Universal document conversion
+
+# Network Security Tools (for SWARM agents)
+python-nmap  # Network scanning
+scapy  # Packet manipulation and analysis
+dnspython  # DNS utilities
+requests  # HTTP client for agent communication
+httpx  # Async HTTP client
+
+# Blockchain Analysis (for cross-chain fraud detection)
+web3  # Ethereum and EVM chains
+bitcoinlib  # Bitcoin blockchain interaction
+
+# BGP Analysis
+pybgpstream  # BGP data stream analysis
+
+# Additional SWARM dependencies
+pyyaml  # Mission file parsing
+docker  # Docker SDK for container management

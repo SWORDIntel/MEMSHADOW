@@ -1,0 +1,154 @@
+# MEMSHADOW Intrusion Detection System (Suricata)
+# APT-Grade Network Threat Detection
+# Classification: UNCLASSIFIED
+
+%YAML 1.1
+---
+
+vars:
+  address-groups:
+    HOME_NET: "[172.29.0.0/24,172.30.0.0/24]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SMTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+    DNP3_SERVER: "$HOME_NET"
+    DNP3_CLIENT: "$HOME_NET"
+    MODBUS_CLIENT: "$HOME_NET"
+    MODBUS_SERVER: "$HOME_NET"
+    ENIP_CLIENT: "$HOME_NET"
+    ENIP_SERVER: "$HOME_NET"
+
+  port-groups:
+    HTTP_PORTS: "80,8000,8080"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+    GENEVE_PORTS: 6081
+    VXLAN_PORTS: 4789
+    TEREDO_PORTS: 3544
+
+# Logging
+outputs:
+  - fast:
+      enabled: yes
+      filename: fast.log
+      append: yes
+
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert:
+            payload: yes
+            payload-printable: yes
+            packet: yes
+            metadata: yes
+            http-body: yes
+            http-body-printable: yes
+            tagged-packets: yes
+        - anomaly:
+            enabled: yes
+            types:
+              decode: yes
+              stream: yes
+              applayer: yes
+        - http:
+            extended: yes
+        - dns
+        - tls:
+            extended: yes
+        - files:
+            force-magic: yes
+        - smtp
+        - ssh
+        - stats:
+            totals: yes
+            threads: yes
+        - flow
+
+# Rule files (OWASP CRS + Custom)
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - suricata.rules
+  - emerging-threats.rules
+  - apt-detection.rules  # Custom APT detection
+  - memshadow-custom.rules
+
+# Performance tuning for 130 TOPS system
+af-packet:
+  - interface: eth0
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    threads: 8  # Utilize multi-core
+    use-mmap: yes
+    tpacket-v3: yes
+    ring-size: 4096
+    block-size: 32768
+
+# Stream engine
+stream:
+  memcap: 4gb
+  checksum-validation: yes
+  inline: auto
+  reassembly:
+    memcap: 2gb
+    depth: 1mb
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+    randomize-chunk-size: yes
+
+# App layer protocol detection
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    http:
+      enabled: yes
+      memcap: 512mb
+    smtp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    dns:
+      tcp:
+        enabled: yes
+      udp:
+        enabled: yes
+
+# Detection engine
+detect:
+  profile: high
+  custom-values:
+    toclient-groups: 3
+    toserver-groups: 25
+  sgh-mpm-context: auto
+  inspection-recursion-limit: 3000
+  prefilter:
+    default: mpm
+
+# Packet acquisition
+pcap:
+  - interface: default
+
+# Threading
+threading:
+  set-cpu-affinity: yes
+  cpu-affinity:
+    - management-cpu-set:
+        cpu: [ 0 ]
+    - receive-cpu-set:
+        cpu: [ 0-3 ]  # Dedicate cores for packet capture
+    - worker-cpu-set:
+        cpu: [ 4-7 ]  # Dedicate cores for analysis
+  detect-thread-ratio: 1.5

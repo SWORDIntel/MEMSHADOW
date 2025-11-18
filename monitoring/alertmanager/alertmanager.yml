@@ -1,0 +1,109 @@
+# AlertManager Configuration for MEMSHADOW
+# Classification: UNCLASSIFIED
+
+global:
+  resolve_timeout: 5m
+  slack_api_url: '${SLACK_WEBHOOK_URL}'  # Set via environment variable
+
+# Templates for notifications
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route tree
+route:
+  group_by: ['alertname', 'cluster', 'severity']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+
+  routes:
+    # Critical alerts go to pager and Slack
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      continue: true
+
+    # High severity alerts go to Slack
+    - match:
+        severity: high
+      receiver: 'high-alerts'
+      continue: true
+
+    # Warning alerts go to Slack (throttled)
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      repeat_interval: 4h
+
+    # Info alerts go to log only
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      group_wait: 1m
+      repeat_interval: 24h
+
+# Inhibition rules
+inhibit_rules:
+  # Inhibit warning if critical is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster']
+
+  # Inhibit info if warning is firing
+  - source_match:
+      severity: 'warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'cluster']
+
+# Receivers
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://memshadow:8000/api/v1/alerts/webhook'
+        send_resolved: true
+
+  - name: 'critical-alerts'
+    slack_configs:
+      - channel: '#memshadow-critical'
+        title: '🔴 CRITICAL ALERT'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Classification:* {{ .Labels.classification | toUpper }}
+          {{ end }}
+        send_resolved: true
+    webhook_configs:
+      - url: '${PAGERDUTY_WEBHOOK_URL}'
+        send_resolved: true
+
+  - name: 'high-alerts'
+    slack_configs:
+      - channel: '#memshadow-alerts'
+        title: '🟠 HIGH PRIORITY ALERT'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+  - name: 'warning-alerts'
+    slack_configs:
+      - channel: '#memshadow-alerts'
+        title: '🟡 Warning'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        send_resolved: false
+
+  - name: 'info-alerts'
+    webhook_configs:
+      - url: 'http://memshadow:8000/api/v1/alerts/webhook'
+        send_resolved: false

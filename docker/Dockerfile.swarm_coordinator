@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    redis \
+    structlog \
+    pyyaml \
+    pydantic
+
+# Copy SWARM code
+COPY app/services/swarm/ ./swarm/
+
+# Copy coordinator startup script
+COPY swarm_agents/run_coordinator.py ./
+
+# Create missions and reports directories
+RUN mkdir -p /missions /reports
+
+CMD ["python", "run_coordinator.py"]
