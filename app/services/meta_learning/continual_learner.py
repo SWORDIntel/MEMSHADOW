@@ -116,7 +116,12 @@ class EWC:
         logger.info(f"Task {task_name} consolidated with EWC")
 
     def _compute_fisher(self, dataloader: Any) -> Dict[str, Any]:
-        """Compute Fisher information matrix"""
+        """
+        Compute Fisher information matrix.
+
+        Fisher Information approximates parameter importance by computing
+        the squared gradients of the log-likelihood.
+        """
         if not TORCH_AVAILABLE:
             return {}
 
@@ -125,23 +130,59 @@ class EWC:
             for name, param in self.model.named_parameters()
         }
 
-        # Compute Fisher as gradient magnitude
+        self.model.eval()
+        n_samples = 0
+
+        # Compute Fisher as gradient magnitude on log-likelihood
         for batch in dataloader:
+            self.model.zero_grad()
+
             # Forward pass
-            # loss = self.model(batch)  # Would compute actual loss
+            # Assuming batch is a tensor or can be converted to one
+            if isinstance(batch, dict):
+                # If batch is dict with 'input' and 'target' keys
+                inputs = batch.get('input', batch.get('data'))
+                targets = batch.get('target', batch.get('label'))
+            elif isinstance(batch, (list, tuple)):
+                # If batch is (input, target) tuple
+                inputs, targets = batch[0], batch[1] if len(batch) > 1 else batch[0]
+            else:
+                # Batch is just input
+                inputs = batch
+                targets = None
 
-            # Backward
-            # loss.backward()
+            # Ensure tensor
+            if not isinstance(inputs, torch.Tensor):
+                inputs = torch.tensor(inputs, dtype=torch.float32)
 
-            # Accumulate Fisher
+            # Forward pass through model
+            outputs = self.model(inputs)
+
+            # Compute loss (reconstruction or classification)
+            if targets is not None:
+                if not isinstance(targets, torch.Tensor):
+                    targets = torch.tensor(targets, dtype=torch.float32)
+                loss = F.mse_loss(outputs, targets)
+            else:
+                # Auto-encoder style: reconstruct input
+                loss = F.mse_loss(outputs, inputs)
+
+            # Backward pass
+            loss.backward()
+
+            # Accumulate squared gradients (Fisher approximation)
             for name, param in self.model.named_parameters():
                 if param.grad is not None:
-                    fisher[name] += param.grad.pow(2)
+                    fisher[name] += param.grad.pow(2).detach()
 
-        # Normalize
-        n_samples = len(dataloader.dataset)
-        for name in fisher:
-            fisher[name] /= n_samples
+            n_samples += inputs.size(0) if hasattr(inputs, 'size') else 1
+
+        # Normalize by number of samples
+        if n_samples > 0:
+            for name in fisher:
+                fisher[name] /= n_samples
+
+        self.model.train()
 
         return fisher
 

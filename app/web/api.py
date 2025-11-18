@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field
 import structlog
 
 from app.web.config import ConfigManager, SystemConfig
-from app.web.auth import authenticate_token, create_access_token
+from app.web.auth import authenticate_token, create_access_token, authenticate_user
+import os
 
 logger = structlog.get_logger()
 
@@ -29,13 +30,19 @@ app = FastAPI(
     redoc_url="/api/redoc"
 )
 
-# CORS middleware
+# Load CORS origins from environment
+cors_origins_str = os.getenv("WEB_CORS_ORIGINS", "http://localhost:8000")
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+
+logger.info("CORS configured", allowed_origins=cors_origins)
+
+# CORS middleware with proper whitelisting
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=cors_origins,  # Whitelist from environment
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Security
@@ -114,12 +121,24 @@ class ConfigUpdateRequest(BaseModel):
 @app.post("/api/auth/login", response_model=TokenResponse, tags=["Authentication"])
 async def login(request: LoginRequest):
     """Login and receive access token"""
-    # TODO: Implement proper authentication
-    # For demo: accept any username/password
+    # Authenticate user
+    user = authenticate_user(request.username, request.password)
 
-    token = create_access_token({"sub": request.username})
+    if not user:
+        logger.warning("Failed login attempt", username=request.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    logger.info("User logged in", username=request.username)
+    # Create access token
+    token = create_access_token({
+        "sub": user.username,
+        "role": user.role
+    })
+
+    logger.info("User logged in successfully", username=request.username)
 
     return TokenResponse(access_token=token)
 
@@ -673,6 +692,7 @@ async def improve_function(request: ImprovementRequest):
 
     try:
         from app.services.self_modifying import ImprovementCategory
+        import ast
 
         # Map category strings to enums
         category_map = {
@@ -688,23 +708,42 @@ async def improve_function(request: ImprovementRequest):
 
         categories = [category_map[cat] for cat in request.categories if cat in category_map]
 
-        # Create temporary function from source code
-        # In production: would handle this more carefully
-        exec_globals = {}
-        exec(request.source_code, exec_globals)
-        function = exec_globals.get(request.function_name)
+        # SECURITY: Validate code using AST instead of exec()
+        # Parse the source code to extract function for analysis
+        try:
+            tree = ast.parse(request.source_code)
+        except SyntaxError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid Python syntax: {str(e)}"
+            )
 
-        if not function:
-            raise HTTPException(status_code=400, detail=f"Function '{request.function_name}' not found in source")
+        # Find the function definition in the AST
+        function_def = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == request.function_name:
+                function_def = node
+                break
 
-        result = await self_modifying_engine.improve_function(
-            function=function,
+        if not function_def:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Function '{request.function_name}' not found in source code"
+            )
+
+        # Pass the source code and function name to the engine for analysis
+        # The engine will perform AST-based analysis without executing code
+        result = await self_modifying_engine.analyze_function_source(
+            source_code=request.source_code,
+            function_name=request.function_name,
             categories=categories,
             auto_apply=request.auto_apply
         )
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to improve function", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

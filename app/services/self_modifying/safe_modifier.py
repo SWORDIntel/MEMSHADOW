@@ -12,13 +12,15 @@ Applies code modifications with safety guarantees:
 ⚠️ CRITICAL: All modifications must pass safety checks.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 from pathlib import Path
 import shutil
 import hashlib
+import ast
+import os
 import structlog
 
 from app.services.self_modifying.test_generator import GeneratedTest, TestCoverage
@@ -106,7 +108,8 @@ class SafeModifier:
         self,
         safety_level: SafetyLevel = SafetyLevel.READ_ONLY,
         backup_dir: str = "/tmp/memshadow_backups",
-        require_tests: bool = True
+        require_tests: bool = True,
+        allowed_directories: Optional[List[str]] = None
     ):
         """
         Initialize safe modifier.
@@ -115,10 +118,23 @@ class SafeModifier:
             safety_level: Maximum allowed risk level
             backup_dir: Directory for backups
             require_tests: Require tests for all modifications
+            allowed_directories: Whitelist of directories that can be modified
         """
         self.safety_level = safety_level
         self.backup_dir = Path(backup_dir)
         self.require_tests = require_tests
+
+        # Security: Whitelist allowed directories
+        if allowed_directories:
+            self.allowed_directories: Set[Path] = {
+                Path(d).resolve() for d in allowed_directories
+            }
+        else:
+            # Default: Only allow app/ directory
+            project_root = Path(__file__).parent.parent.parent.parent
+            self.allowed_directories: Set[Path] = {
+                (project_root / "app").resolve()
+            }
 
         # Create backup directory
         self.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -135,7 +151,8 @@ class SafeModifier:
         logger.info(
             "Safe modifier initialized",
             safety_level=safety_level.value,
-            require_tests=require_tests
+            require_tests=require_tests,
+            allowed_dirs=[str(d) for d in self.allowed_directories]
         )
 
     async def apply_modification(
@@ -382,15 +399,98 @@ class SafeModifier:
 
         return backup_path
 
+    def _validate_path(self, target_file: str) -> bool:
+        """
+        Validate that target file is within allowed directories.
+
+        Args:
+            target_file: Path to validate
+
+        Returns:
+            True if path is safe, False otherwise
+        """
+        try:
+            # Resolve to absolute path (prevents ../../../etc/passwd tricks)
+            target_path = Path(target_file).resolve()
+
+            # Check if path is within any allowed directory
+            for allowed_dir in self.allowed_directories:
+                try:
+                    target_path.relative_to(allowed_dir)
+                    # If no exception, path is within allowed directory
+                    logger.debug(
+                        "Path validation passed",
+                        target=str(target_path),
+                        allowed_dir=str(allowed_dir)
+                    )
+                    return True
+                except ValueError:
+                    # Not relative to this allowed directory
+                    continue
+
+            # Path not in any allowed directory
+            logger.warning(
+                "Path validation FAILED - not in allowed directories",
+                target=str(target_path),
+                allowed_dirs=[str(d) for d in self.allowed_directories]
+            )
+            return False
+
+        except Exception as e:
+            logger.error(f"Path validation error: {e}", target_file=target_file)
+            return False
+
+    def _validate_code_syntax(self, code: str) -> tuple[bool, Optional[str]]:
+        """
+        Validate code has correct Python syntax using AST.
+
+        Args:
+            code: Python code to validate
+
+        Returns:
+            (is_valid, error_message)
+        """
+        try:
+            ast.parse(code)
+            return True, None
+        except SyntaxError as e:
+            error_msg = f"Syntax error at line {e.lineno}: {e.msg}"
+            logger.warning("Code syntax validation failed", error=error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"Code validation error: {str(e)}"
+            logger.error("Code validation error", error=str(e))
+            return False, error_msg
+
     async def _write_code(self, target_file: str, code: str):
-        """Write code to file"""
+        """
+        Write code to file with security checks.
+
+        SECURITY:
+        - Validates path to prevent traversal attacks
+        - Validates code syntax before writing
+        - Currently simulated for safety
+        """
+        # Validate path
+        if not self._validate_path(target_file):
+            raise ValueError(f"Invalid path: {target_file} - not in allowed directories")
+
+        # Validate code syntax
+        is_valid, error_msg = self._validate_code_syntax(code)
+        if not is_valid:
+            raise ValueError(f"Invalid code syntax: {error_msg}")
+
         # In production: would write to actual file
-        # For safety demo: just log
+        # For safety: Currently simulated
         logger.debug(
-            "Code write simulated",
+            "Code write simulated (passed security validation)",
             target_file=target_file,
             code_length=len(code)
         )
+
+        # If you want to enable actual writes, uncomment below:
+        # target_path = Path(target_file).resolve()
+        # target_path.write_text(code)
 
     async def _run_tests(
         self,

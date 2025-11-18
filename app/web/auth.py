@@ -8,16 +8,27 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
+import os
+from passlib.context import CryptContext
 import structlog
 
 logger = structlog.get_logger()
 
-# TODO: Load from config
-SECRET_KEY = "CHANGE_ME_IN_PRODUCTION_USE_STRONG_SECRET"
-ALGORITHM = "HS256"
-TOKEN_EXPIRY_HOURS = 24
+# Load from environment variables
+SECRET_KEY = os.getenv("WEB_SECRET_KEY", "INSECURE_DEFAULT_CHANGE_ME_IN_PRODUCTION")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+TOKEN_EXPIRY_HOURS = int(os.getenv("WEB_TOKEN_EXPIRY_HOURS", "24"))
+
+# Password hashing context (bcrypt)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 security = HTTPBearer()
+
+# Warn if using default secret
+if SECRET_KEY == "INSECURE_DEFAULT_CHANGE_ME_IN_PRODUCTION":
+    logger.critical(
+        "SECURITY WARNING: Using default SECRET_KEY! Set WEB_SECRET_KEY environment variable!"
+    )
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
@@ -102,37 +113,29 @@ def authenticate_token(credentials: HTTPAuthorizationCredentials = Security(secu
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verify password against hash.
-
-    TODO: Implement proper password hashing (bcrypt/argon2)
+    Verify password against hash using bcrypt.
 
     Args:
         plain_password: Plain text password
-        hashed_password: Hashed password
+        hashed_password: Bcrypt hashed password
 
     Returns:
         True if password matches
     """
-    # TODO: Use proper password hashing
-    # For demo purposes only - DO NOT use in production!
-    return plain_password == hashed_password
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
     """
-    Hash password.
-
-    TODO: Implement proper password hashing (bcrypt/argon2)
+    Hash password using bcrypt.
 
     Args:
         password: Plain text password
 
     Returns:
-        Hashed password
+        Bcrypt hashed password
     """
-    # TODO: Use proper password hashing
-    # For demo purposes only - DO NOT use in production!
-    return password
+    return pwd_context.hash(password)
 
 
 class User:
@@ -145,10 +148,29 @@ class User:
 
 
 # In-memory user database (TODO: Replace with proper database)
+# Load admin credentials from environment
+_admin_username = os.getenv("WEB_ADMIN_USERNAME", "admin")
+_admin_password = os.getenv("WEB_ADMIN_PASSWORD", "admin")
+
+# Hash the admin password if it's not already hashed
+# Bcrypt hashes start with $2b$ or $2a$
+if not _admin_password.startswith("$2"):
+    logger.warning(
+        "Admin password not hashed in environment, hashing now. "
+        "For better security, store pre-hashed passwords."
+    )
+    _admin_password = get_password_hash(_admin_password)
+
 USERS_DB: Dict[str, User] = {
-    "admin": User("admin", "admin", role="admin"),  # CHANGE IN PRODUCTION!
-    "user": User("user", "user", role="user")  # CHANGE IN PRODUCTION!
+    _admin_username: User(_admin_username, _admin_password, role="admin"),
 }
+
+# Warn if using default credentials
+if _admin_username == "admin" and os.getenv("WEB_ADMIN_PASSWORD", "admin") == "admin":
+    logger.critical(
+        "SECURITY WARNING: Using default admin credentials! "
+        "Set WEB_ADMIN_USERNAME and WEB_ADMIN_PASSWORD environment variables!"
+    )
 
 
 def authenticate_user(username: str, password: str) -> Optional[User]:
