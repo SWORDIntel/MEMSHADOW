@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MEMSHADOW</title>
+  <style>
+    /*
+     * TEMPEST Level C Compliant Theme
+     * - Low contrast ratios (<3:1)
+     * - Subdued grays and muted tones
+     * - No bright whites or pure blacks
+     * - Minimal electromagnetic emanation risk
+     */
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 360px;
+      min-height: 500px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      /* TEMPEST C: Subdued gray background */
+      background: #3a3a3a;
+      color: #a8a8a8;
+      font-size: 13px;
+    }
+
+    .container {
+      padding: 16px;
+    }
+
+    /* Header */
+    .header {
+      background: #424242;
+      padding: 12px 16px;
+      border-bottom: 1px solid #505050;
+    }
+
+    .logo {
+      font-size: 16px;
+      font-weight: 600;
+      color: #909090;
+      letter-spacing: 1px;
+    }
+
+    .status {
+      font-size: 11px;
+      color: #787878;
+      margin-top: 4px;
+    }
+
+    .status.connected {
+      color: #808080;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: #3e3e3e;
+      border-bottom: 1px solid #505050;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 10px;
+      background: none;
+      border: none;
+      color: #808080;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+
+    .tab.active {
+      background: #4a4a4a;
+      color: #a0a0a0;
+      border-bottom: 2px solid #707070;
+    }
+
+    .tab:hover {
+      background: #464646;
+    }
+
+    /* Tab content */
+    .tab-content {
+      display: none;
+      padding: 16px;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Form elements */
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: #909090;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    textarea,
+    select {
+      width: 100%;
+      padding: 8px;
+      background: #464646;
+      border: 1px solid #585858;
+      color: #a8a8a8;
+      border-radius: 3px;
+      font-size: 13px;
+    }
+
+    input::placeholder {
+      color: #707070;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+      font-family: inherit;
+    }
+
+    /* Buttons - TEMPEST C: Subdued, low contrast */
+    button {
+      padding: 8px 14px;
+      background: #525252;
+      color: #989898;
+      border: 1px solid #606060;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #5a5a5a;
+    }
+
+    button:active {
+      background: #4e4e4e;
+    }
+
+    button.primary {
+      background: #5a5a5a;
+      color: #a8a8a8;
+      border-color: #686868;
+    }
+
+    button.primary:hover {
+      background: #626262;
+    }
+
+    /* Lists */
+    .list {
+      list-style: none;
+    }
+
+    .list-item {
+      padding: 10px;
+      background: #424242;
+      border: 1px solid #505050;
+      border-radius: 3px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .list-item:hover {
+      background: #4a4a4a;
+    }
+
+    .list-item-title {
+      font-size: 13px;
+      color: #a0a0a0;
+      margin-bottom: 4px;
+    }
+
+    .list-item-meta {
+      font-size: 11px;
+      color: #787878;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #787878;
+    }
+
+    .empty-state-icon {
+      font-size: 32px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    /* Settings */
+    .setting {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #4a4a4a;
+    }
+
+    .setting-label {
+      font-size: 13px;
+      color: #909090;
+    }
+
+    .setting-description {
+      font-size: 11px;
+      color: #707070;
+      margin-top: 2px;
+    }
+
+    /* Toggle switch - TEMPEST C compliant */
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 20px;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #505050;
+      transition: 0.3s;
+      border-radius: 20px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background: #707070;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    .toggle input:checked + .toggle-slider {
+      background: #606060;
+    }
+
+    .toggle input:checked + .toggle-slider:before {
+      transform: translateX(20px);
+      background: #888888;
+    }
+
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      background: #424242;
+      padding: 12px;
+      border-radius: 3px;
+      border: 1px solid #505050;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      color: #909090;
+      font-weight: 600;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #787878;
+      margin-top: 4px;
+    }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #787878;
+    }
+
+    .spinner {
+      border: 2px solid #505050;
+      border-top: 2px solid #787878;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Utility */
+    .mt-2 { margin-top: 8px; }
+    .mb-2 { margin-bottom: 8px; }
+    .text-center { text-align: center; }
+    .text-small { font-size: 11px; color: #707070; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">MEMSHADOW</div>
+    <div class="status" id="status">Initializing...</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="search">Search</button>
+    <button class="tab" data-tab="projects">Projects</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </div>
+
+  <!-- Dashboard Tab -->
+  <div class="tab-content active" id="dashboard">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value" id="stat-memories">-</div>
+        <div class="stat-label">Memories</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="stat-sessions">-</div>
+        <div class="stat-label">Sessions</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Current Project</label>
+      <select id="current-project">
+        <option value="">Select project...</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <button class="primary" style="width: 100%;" id="create-checkpoint">
+        Create Checkpoint
+      </button>
+    </div>
+
+    <div class="form-group">
+      <button style="width: 100%;" id="inject-context">
+        Inject Context
+      </button>
+    </div>
+  </div>
+
+  <!-- Search Tab -->
+  <div class="tab-content" id="search">
+    <div class="form-group">
+      <input type="text" id="search-input" placeholder="Search memories...">
+    </div>
+
+    <div id="search-results"></div>
+  </div>
+
+  <!-- Projects Tab -->
+  <div class="tab-content" id="projects">
+    <div class="form-group">
+      <button class="primary" style="width: 100%;" id="new-project">
+        New Project
+      </button>
+    </div>
+
+    <div id="projects-list"></div>
+  </div>
+
+  <!-- Settings Tab -->
+  <div class="tab-content" id="settings">
+    <div class="setting">
+      <div>
+        <div class="setting-label">Auto-capture conversations</div>
+        <div class="setting-description">Automatically save Claude conversations</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="auto-capture" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="setting">
+      <div>
+        <div class="setting-label">Auto-inject context</div>
+        <div class="setting-description">Automatically provide relevant context</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="auto-inject">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="setting">
+      <div>
+        <div class="setting-label">TEMPEST Level C Theme</div>
+        <div class="setting-description">Low-emanation secure display mode</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="tempest-theme" checked disabled>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="form-group mt-2">
+      <button style="width: 100%;" id="logout">Logout</button>
+    </div>
+
+    <div class="text-small text-center mt-2">
+      Version 1.0.0 | TEMPEST-C Compliant
+    </div>
+  </div>
+
+  <script src="../src/popup.js"></script>
+</body>
+</html>

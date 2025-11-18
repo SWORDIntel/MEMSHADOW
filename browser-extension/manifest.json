@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "MEMSHADOW",
+  "version": "1.0.0",
+  "description": "AI-powered memory system for Claude conversations",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "public/popup.html",
+    "default_icon": {
+      "16": "public/icons/icon16.png",
+      "48": "public/icons/icon48.png",
+      "128": "public/icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "public/icons/icon16.png",
+    "48": "public/icons/icon48.png",
+    "128": "public/icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/inject.js"],
+      "matches": ["https://claude.ai/*"]
+    }
+  ]
+}
