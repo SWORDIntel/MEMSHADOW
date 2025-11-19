@@ -92,9 +92,9 @@ docker-compose down
 
 ```mermaid
 flowchart TD
-  UI[Web Interface<br/>(FastAPI + Jinja2)]
+  UI[Web Interface (FastAPI + Jinja2)]
 
-  subgraph CORE[MEMSHADOW Core Services]
+  subgraph CORE["MEMSHADOW Core Services"]
     FL[Federated Learning]
     ML[Meta-Learning]
     CS[Consciousness System]
@@ -103,10 +103,10 @@ flowchart TD
     QE[Query Engine]
   end
 
-  subgraph DATA[Data Layer]
-    PG[(PostgreSQL 15<br/>Primary DB)]
-    RD[(Redis 7<br/>Cache)]
-    CH[(ChromaDB<br/>Vectors)]
+  subgraph DATA["Data Layer"]
+    PG[(PostgreSQL 15 - Primary DB)]
+    RD[(Redis 7 - Cache)]
+    CH[(ChromaDB - Vectors)]
   end
 
   UI --> CORE
@@ -114,7 +114,6 @@ flowchart TD
 
   FL --- ML --- CS
   SM --- MS --- QE
-```
 
 ---
 
