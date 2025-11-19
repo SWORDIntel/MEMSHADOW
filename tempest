@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""
+TEMPEST TUI Launcher
+Quick launcher for MEMSHADOW TEMPEST interface
+"""
+
+if __name__ == "__main__":
+    from app.tui.tempest_tui import main
+    main()

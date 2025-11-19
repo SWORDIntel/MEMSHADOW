@@ -1,0 +1,121 @@
+mission_id: "offensive_audit_001"
+mission_name: "Comprehensive Offensive Security Audit"
+description: "Complete offensive security assessment using all SWARM capabilities including WiFi, web, network, and blockchain analysis"
+
+objective_stages:
+  - stage_id: "network_enumeration"
+    description: "ENUMERATE: Network discovery and service detection"
+    tasks:
+      - agent_type: "recon"
+        params:
+          target_cidr: "192.168.1.0/24"
+          scan_type: "comprehensive"
+          ports: "1-65535"
+    success_criteria:
+      - "blackboard_key_exists:known_hosts"
+      - "num_known_hosts >= 1"
+
+  - stage_id: "wifi_assessment"
+    description: "ENUMERATE: WiFi network reconnaissance"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "scan"
+          interface: "wlan0"
+          scan_time: 30
+          show_hidden: true
+    success_criteria:
+      - "wifi_networks_discovered"
+
+  - stage_id: "web_discovery"
+    description: "ENUMERATE: Web application discovery and crawling"
+    depends_on: "network_enumeration"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "crawl"
+          url_from_blackboard: "primary_web_service_host"
+          max_depth: 3
+          max_pages: 100
+          extract_forms: true
+    success_criteria:
+      - "web_endpoints_discovered"
+
+  - stage_id: "api_mapping"
+    description: "PLAN: API endpoint enumeration"
+    depends_on: "web_discovery"
+    tasks:
+      - agent_type: "apimapper"
+        params_from_blackboard:
+          target_host: "primary_web_service_host"
+          target_port: "primary_web_service_port"
+    success_criteria:
+      - "api_endpoints_mapped"
+
+  - stage_id: "web_vulnerability_scan"
+    description: "PLAN: Comprehensive web vulnerability assessment"
+    depends_on: "web_discovery"
+    tasks:
+      - agent_type: "webscan"
+        params:
+          task_type: "scan"
+          url_from_blackboard: "primary_web_service_host"
+          scan_depth: "deep"
+          test_categories:
+            - "xss"
+            - "sqli"
+            - "ssrf"
+            - "xxe"
+            - "lfi"
+            - "rce"
+          cve_analysis: true
+    success_criteria:
+      - "web_vulnerabilities_analyzed"
+
+  - stage_id: "authentication_testing"
+    description: "EXECUTE: Authentication and authorization testing"
+    depends_on: "api_mapping"
+    tasks:
+      - agent_type: "authtest"
+        params_from_blackboard:
+          endpoints: "discovered_endpoints"
+    success_criteria:
+      - "all_endpoints_tested"
+
+  - stage_id: "bgp_monitoring"
+    description: "EXECUTE: BGP route monitoring for hijacking"
+    tasks:
+      - agent_type: "bgp"
+        params:
+          monitor_asns: [13335, 15169, 8075]  # Cloudflare, Google, Microsoft
+          check_rpki: true
+    success_criteria:
+      - "bgp_routes_analyzed"
+
+  - stage_id: "blockchain_analysis"
+    description: "EXECUTE: Blockchain fraud detection"
+    tasks:
+      - agent_type: "blockchain"
+        params:
+          chains: ["ethereum", "bitcoin"]
+          analysis_depth: "deep"
+          detect_patterns: ["wash_trading", "pump_dump", "rugpull"]
+    success_criteria:
+      - "blockchain_transactions_analyzed"
+
+  - stage_id: "wifi_handshake_capture"
+    description: "EXECUTE: WiFi handshake capture for target networks"
+    depends_on: "wifi_assessment"
+    tasks:
+      - agent_type: "wifi"
+        params:
+          task_type: "capture"
+          interface: "wlan0"
+          bssid_from_blackboard: "target_wifi_bssid"
+          channel_from_blackboard: "target_wifi_channel"
+          timeout: 60
+          deauth_count: 15
+    success_criteria:
+      - "handshake_captured"
+
+overall_success_condition: "All stages completed and comprehensive security report generated with full IoC analysis and vulnerability assessment"

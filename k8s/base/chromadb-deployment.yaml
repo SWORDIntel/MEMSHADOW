@@ -1,0 +1,107 @@
+---
+# ChromaDB Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chromadb
+  namespace: memshadow
+  labels:
+    app.kubernetes.io/name: chromadb
+    app.kubernetes.io/component: vector-db
+    app.kubernetes.io/part-of: memshadow
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chromadb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chromadb
+        app.kubernetes.io/component: vector-db
+    spec:
+      containers:
+      - name: chromadb
+        image: chromadb/chroma:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: CHROMA_SERVER_AUTH_PROVIDER
+          value: "chromadb.auth.token.TokenAuthServerProvider"
+        - name: CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER
+          value: "X-Chroma-Token"
+        - name: CHROMA_SERVER_AUTH_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: memshadow-secrets
+              key: CHROMA_TOKEN
+        - name: ALLOW_RESET
+          value: "false"
+        - name: IS_PERSISTENT
+          value: "true"
+        - name: ANONYMIZED_TELEMETRY
+          value: "false"
+        volumeMounts:
+        - name: chromadb-storage
+          mountPath: /chroma/chroma
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /api/v1/heartbeat
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v1/heartbeat
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: chromadb-storage
+        persistentVolumeClaim:
+          claimName: chromadb-pvc
+      securityContext:
+        fsGroup: 1000
+
+---
+# ChromaDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: chromadb-service
+  namespace: memshadow
+  labels:
+    app.kubernetes.io/name: chromadb
+    app.kubernetes.io/component: vector-db
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app.kubernetes.io/name: chromadb
