@@ -315,8 +315,8 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 ### 2. Configuration Management
 
 **Files:**
-- `.env.production.template` - Production configuration template
-- `.env.example` - Development example (updated)
+- `config/.env.production.template` - Production configuration template
+- `config/.env.example` - Development example (updated)
 
 **Security:**
 - All secrets in environment variables

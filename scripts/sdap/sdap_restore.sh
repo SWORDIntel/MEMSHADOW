@@ -7,10 +7,13 @@ set -euo pipefail
 # Load configuration
 if [ -f /etc/memshadow/sdap.conf ]; then
     source /etc/memshadow/sdap.conf
-elif [ -f "$(dirname "$0")/../../sdap.conf.example" ]; then
-    source "$(dirname "$0")/../../sdap.conf.example"
+elif [ -f "$(dirname "$0")/../../config/sdap.conf.example" ]; then
+    source "$(dirname "$0")/../../config/sdap.conf.example"
 else
     echo "ERROR: SDAP configuration not found"
+    echo "Expected locations:"
+    echo "  /etc/memshadow/sdap.conf"
+    echo "  $(dirname "$0")/../../config/sdap.conf.example"
     exit 1
 fi
 

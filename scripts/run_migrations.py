@@ -43,10 +43,12 @@ def run_migrations():
     """
     print("--- Running database migrations ---")
 
-    alembic_ini_path = os.path.join(project_root, 'alembic.ini')
+    # alembic.ini is in the config/ directory
+    alembic_ini_path = os.path.join(project_root, 'config', 'alembic.ini')
 
     if not os.path.exists(alembic_ini_path):
         print(f"Error: alembic.ini not found at {alembic_ini_path}")
+        print(f"Note: alembic.ini should be in the config/ directory")
         return
 
     alembic_cfg = Config(alembic_ini_path)

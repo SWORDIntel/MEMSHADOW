@@ -6,10 +6,14 @@ set -euo pipefail
 # Load configuration if it exists
 if [ -f /etc/memshadow/sdap.conf ]; then
     source /etc/memshadow/sdap.conf
-elif [ -f ./sdap.conf ]; then
-    source ./sdap.conf
+elif [ -f ./config/sdap.conf.example ]; then
+    source ./config/sdap.conf.example
+    echo "WARNING: Using example configuration from ./config/sdap.conf.example"
 else
     echo "ERROR: Configuration file not found."
+    echo "Expected locations:"
+    echo "  /etc/memshadow/sdap.conf (production)"
+    echo "  ./config/sdap.conf.example (development)"
     exit 1
 fi
 

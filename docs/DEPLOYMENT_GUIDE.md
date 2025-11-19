@@ -14,7 +14,7 @@ git clone https://github.com/SWORDIntel/MEMSHADOW.git
 cd MEMSHADOW
 
 # 2. Configure environment
-cp .env.example .env
+cp config/.env.example .env
 # Edit .env with secure credentials (see below)
 
 # 3. Install dependencies
