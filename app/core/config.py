@@ -79,9 +79,34 @@ class Settings(BaseSettings):
     SDAP_GPG_KEY_ID: str = ""
 
     # Embedding Configuration
-    EMBEDDING_MODEL: str = "sentence-transformers/all-mpnet-base-v2"
-    EMBEDDING_DIMENSION: int = 768
+    # Backend options: "sentence-transformers", "openai", "cohere"
+    EMBEDDING_BACKEND: str = "sentence-transformers"
+
+    # Sentence-Transformers Models:
+    # - "sentence-transformers/all-mpnet-base-v2" (768d) - Balanced, fast
+    # - "BAAI/bge-large-en-v1.5" (1024d) - High quality, recommended
+    # - "thenlper/gte-large" (1024d) - Alternative high quality
+    # - "sentence-transformers/paraphrase-multilingual-mpnet-base-v2" (768d→2048d with projection)
+    #
+    # OpenAI Models:
+    # - "text-embedding-3-small" (1536d) - Cost effective
+    # - "text-embedding-3-large" (3072d, configurable) - Highest quality
+    #
+    # For 2048d: Set EMBEDDING_MODEL to any base model and EMBEDDING_DIMENSION to 2048
+    # The system will add a projection layer if needed
+    EMBEDDING_MODEL: str = "BAAI/bge-large-en-v1.5"
+    EMBEDDING_DIMENSION: int = 2048
     EMBEDDING_CACHE_TTL: int = 3600
+    EMBEDDING_USE_PROJECTION: bool = True  # Auto-project to EMBEDDING_DIMENSION if model != target
+
+    # OpenAI Configuration (if EMBEDDING_BACKEND="openai")
+    OPENAI_API_KEY: str = ""
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-large"
+
+    # Advanced NLP Configuration
+    USE_ADVANCED_NLP: bool = True
+    NLP_QUERY_EXPANSION: bool = True
+    SEMANTIC_SIMILARITY_THRESHOLD: float = 0.7
 
     class Config:
         case_sensitive = True
