@@ -23,7 +23,7 @@ class Memory(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     content = Column(Text, nullable=False)
     content_hash = Column(String(64), nullable=False)  # SHA256 hash
-    embedding = Column(Vector(2048))  # Upgraded to 2048-dim for advanced NLP
+    embedding = Column(Vector(768))  # Embedding vector
     extra_data = Column(JSONB, nullable=False, default={})
 
     # Timestamps

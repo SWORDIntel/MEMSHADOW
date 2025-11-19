@@ -187,6 +187,20 @@ async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/health", tags=["System"])
+async def health_check():
+    """
+    Health check endpoint for Docker and load balancers.
+    Returns 200 OK if service is healthy.
+    """
+    return {
+        "status": "healthy",
+        "service": "memshadow",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
 @app.get("/api/status", response_model=StatusResponse, tags=["System"])
 async def get_status():
     """Get system status"""

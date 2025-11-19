@@ -79,20 +79,9 @@ class Settings(BaseSettings):
     SDAP_GPG_KEY_ID: str = ""
 
     # Embedding Configuration
-    # Using advanced model for 2048-dim embeddings and superior NLP
     EMBEDDING_MODEL: str = "sentence-transformers/all-mpnet-base-v2"
-    EMBEDDING_DIMENSION: int = 2048  # Upgraded for advanced NLP querying
+    EMBEDDING_DIMENSION: int = 768
     EMBEDDING_CACHE_TTL: int = 3600
-
-    # Advanced NLP Configuration
-    USE_ADVANCED_NLP: bool = True
-    NLP_QUERY_EXPANSION: bool = True  # Expand queries for better matches
-    SEMANTIC_SIMILARITY_THRESHOLD: float = 0.7
-
-    # VantaBlackWidow-inspired Analysis
-    ENABLE_AI_VULN_ANALYSIS: bool = True
-    ENABLE_PAYLOAD_FUZZING: bool = True
-    IOC_EXTRACTION_ENABLED: bool = True
 
     class Config:
         case_sensitive = True

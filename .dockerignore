@@ -4,7 +4,7 @@
 .gitattributes
 
 # Python
-__pycache__
+__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -12,87 +12,57 @@ __pycache__
 env/
 venv/
 ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.hypothesis/
+# Documentation (not needed in container)
+docs/archive/
+docs/specs/
+*.md
+!README.md
 
-# Documentation (built docs)
-docs/_build/
-site/
-
-# Logs
-*.log
+# Data and logs (mounted as volumes)
+data/
 logs/
-
-# Database
+tmp/
 *.db
 *.sqlite
-*.sqlite3
 
-# Environment
+# Test files
+tests/
+test_*.py
+
+# Development files
 .env
 .env.local
 .env.*.local
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Exfiltrated data (don't include in image)
-exfil/
-payloads/
-missions/classified/
-
-# CI/CD
-.github/
-.gitlab-ci.yml
-.travis.yml
-
-# Docker
 docker-compose.override.yml
-Dockerfile*
-.dockerignore
 
-# Kubernetes
-k8s/secrets/
+# Build artifacts
+dist/
+build/
+*.egg
 
-# Backups
+# Browser extension (not needed for backend)
+browser-extension/
+
+# Backup files
 *.bak
 *.backup
-
-# OS
-Thumbs.db
-Desktop.ini
-
-# Node (if any frontend)
-node_modules/
-npm-debug.log
-yarn-error.log
+*.old

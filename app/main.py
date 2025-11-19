@@ -4,11 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
 
-from app.api.v1 import auth, memory, health, spinbuster, tempest_dashboard, c2
-from app.api.v1.mcp import mcp_router
+from app.api.v1 import auth, memory, health
 from app.core.config import settings
 from app.core.logging import setup_logging
-from app.core.metrics import get_metrics
 from app.db import postgres, chromadb, redis
 from app.api.middleware import (
     RequestIDMiddleware,
@@ -70,16 +68,7 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(memory.router, prefix=f"{settings.API_V1_STR}/memory", tags=["memory"])
-app.include_router(mcp_router, prefix=f"{settings.API_V1_STR}")  # MCP endpoints
-app.include_router(tempest_dashboard.router, prefix=f"{settings.API_V1_STR}/tempest", tags=["tempest"])  # TEMPEST Dashboard (FLUSTERCUCKER-inspired)
-app.include_router(c2.router, prefix=f"{settings.API_V1_STR}", tags=["c2"])  # C2 Framework (DavBest-inspired)
-app.include_router(spinbuster.router, prefix=f"{settings.API_V1_STR}/spinbuster", tags=["spinbuster"])  # SPINBUSTER Dashboard (legacy)
 
 @app.get("/")
 def read_root():
     return {"project": settings.PROJECT_NAME, "version": settings.VERSION}
-
-@app.get(f"{settings.API_V1_STR}/metrics")
-async def metrics_endpoint():
-    """Prometheus metrics endpoint"""
-    return await get_metrics()

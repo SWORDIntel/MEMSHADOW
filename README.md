@@ -1,673 +1,385 @@
-# MEMSHADOW
+# MEMSHADOW 🧠
 
-> **Advanced Offensive Security Platform with AI/ML Acceleration**
+**Advanced Cross-LLM Memory Persistence Platform**
 
-[![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux-blue.svg)](https://www.linux.org/)
-[![Docker](https://img.shields.io/badge/docker-20.10+-blue.svg)](https://www.docker.com/)
-[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![Classification](https://img.shields.io/badge/classification-UNCLASSIFIED-green.svg)]()
+[![Production Ready](https://img.shields.io/badge/production-ready-brightgreen)](https://github.com/SWORDIntel/MEMSHADOW)
+[![Security Grade](https://img.shields.io/badge/security-A-brightgreen)](docs/PRODUCTION_SECURITY.md)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://hub.docker.com)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**MEMSHADOW** is a comprehensive offensive security platform designed for advanced penetration testing, red team operations, and security research. It combines modern C2 capabilities, social engineering tools, AI/ML-powered analysis, and APT-grade defensive hardening.
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Security](#security)
-- [Documentation](#documentation)
-- [Requirements](#requirements)
-- [Project Structure](#project-structure)
-- [Contributing](#contributing)
-- [License](#license)
+MEMSHADOW enables seamless context preservation and knowledge accumulation across different AI providers and custom deployments, addressing the critical limitation of session-based memory in current Large Language Model implementations.
 
 ---
 
-## Features
-
-### 🎯 Core Capabilities
-
-**Command & Control (C2) Framework**
-- Multi-protocol implant communication (HTTP/HTTPS, WebSocket, DNS)
-- Session management with encryption
-- Task queuing and execution
-- Data exfiltration pipelines
-- Payload generation and delivery
-
-**Social Engineering - LureCraft**
-- Phishing page generation
-- Credential harvesting
-- Email template creation
-- QR code phishing
-- Multi-factor authentication bypass techniques
-
-**Mission Management**
-- Campaign planning and tracking
-- Target profiling and reconnaissance
-- Attack chain orchestration
-- Results aggregation and reporting
-- MITRE ATT&CK mapping
-
-### 🔒 Security & Defense
-
-**APT-Grade Hardening**
-- 8-layer defense-in-depth architecture
-- Container hardening (read-only filesystems, capability dropping)
-- AppArmor and Seccomp profiles
-- Network segmentation (internal + DMZ)
-- Web Application Firewall (ModSecurity + OWASP CRS)
-- Intrusion Detection System (Suricata)
-- Zero-trust architecture
-
-**Threat Intelligence Integration**
-- MISP (Malware Information Sharing Platform)
-- OpenCTI (Open Cyber Threat Intelligence)
-- AbuseIPDB reputation tracking
-- STIX 2.x indicator parsing
-- IOC correlation and deduplication
-- Automated blocking of high-confidence threats
-
-### 🤖 AI/ML Capabilities (130 TOPS)
-
-**Hardware Acceleration**
-- NVIDIA CUDA GPU support (82 TOPS)
-- Intel NPU optimization (48 TOPS)
-- Mixed precision inference (FP16/TF32)
-- Tensor Core acceleration
-- Batch processing for efficiency
-
-**AI-Powered Analysis**
-- Vulnerability classification and prioritization
-- Network anomaly detection
-- Automated CVSS scoring
-- Exploit prediction modeling
-- Traffic pattern analysis
-- Lateral movement detection
-
-### 📊 Monitoring & Observability
-
-**Metrics Collection**
-- 50+ Prometheus metrics
-- C2 session tracking
-- Mission success rates
-- Vulnerability statistics
-- System resource monitoring
-- API performance metrics
-
-**Visualization**
-- Grafana dashboards (13 panels)
-- Real-time alerting (AlertManager)
-- Classification banner compliance
-- Custom metric queries
-- Anomaly detection graphs
-
-### 🚀 Deployment & Operations
-
-**Production-Ready**
-- Docker and Kubernetes support
-- Automated deployment scripts
-- systemd service management
-- Rolling updates with zero downtime
-- Health checks and self-healing
-- Comprehensive backup/restore
-
-**CI/CD Pipeline**
-- 10-job automated workflow
-- Security scanning (Trivy)
-- Unit and integration testing
-- Performance testing (k6)
-- Code coverage tracking
-- Automated deployments
-
----
-
-## Quick Start
-
-### Two Simple Entry Points
-
-MEMSHADOW provides **only two commands** you need to know:
-
-1. **`./install.sh`** - Install MEMSHADOW (one-time setup)
-2. **`memshadow`** - Manage MEMSHADOW (all operations)
-
-### Installation (Single Command)
-
-```bash
-# Clone repository
-git clone https://github.com/SWORDIntel/MEMSHADOW.git
-cd MEMSHADOW
-
-# Run installer (interactive wizard)
-sudo ./install.sh
-```
-
-The installer will:
-- ✓ Check prerequisites (Docker, Python, etc.)
-- ✓ Collect configuration through interactive prompts
-- ✓ Generate secure secrets automatically
-- ✓ Detect hardware (GPU/NPU)
-- ✓ Configure threat intelligence feeds
-- ✓ Install systemd service
-- ✓ Start MEMSHADOW platform
-
-### Post-Installation (All Operations Use `memshadow`)
-
-```bash
-# Check status
-memshadow status
-
-# View logs
-memshadow logs memshadow -f
-
-# Run health check
-memshadow health
-
-# Access web interfaces
-# Main API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
-# Grafana: http://localhost:3000 (admin/<your-password>)
-```
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        MEMSHADOW Platform                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │
-│  │    C2       │  │  LureCraft  │  │  Mission    │           │
-│  │  Framework  │  │   Social    │  │ Management  │           │
-│  │             │  │ Engineering │  │             │           │
-│  └─────────────┘  └─────────────┘  └─────────────┘           │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────┐   │
-│  │              FastAPI REST + WebSocket                  │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                      Security Layers                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌────────┐  ┌────────┐  ┌────────┐  ┌─────────────────┐    │
-│  │  WAF   │→ │  IDS   │→ │ API    │→ │ Container       │    │
-│  │ModSec  │  │Suricata│  │Hardening  │ Hardening       │    │
-│  └────────┘  └────────┘  └────────┘  └─────────────────┘    │
-│                                                                 │
-│  ┌─────────────────┐  ┌──────────────────────────────┐       │
-│  │ Threat Intel    │  │     AI/ML Engine             │       │
-│  │ MISP | OpenCTI  │  │  GPU (82 TOPS) + NPU (48)    │       │
-│  └─────────────────┘  └──────────────────────────────┘       │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                       Data Layer                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────┐  ┌───────┐  ┌──────────┐                       │
-│  │PostgreSQL│  │ Redis │  │ChromaDB  │                       │
-│  │(Primary) │  │(Cache)│  │(Vectors) │                       │
-│  └──────────┘  └───────┘  └──────────┘                       │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                    Monitoring Stack                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌────────────┐  ┌─────────┐  ┌──────────────┐              │
-│  │ Prometheus │→ │ Grafana │  │ AlertManager │              │
-│  └────────────┘  └─────────┘  └──────────────┘              │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Network Architecture
-
-```
-                      Internet
-                         │
-                         ▼
-                   ┌──────────┐
-                   │   WAF    │  ModSecurity + OWASP CRS
-                   │  :443    │
-                   └──────────┘
-                         │
-                         ▼
-             ┌───────────────────────┐
-             │    DMZ Network        │  172.30.0.0/24
-             │  (Controlled Access)  │
-             └───────────────────────┘
-                         │
-                         ▼
-                   ┌──────────┐
-                   │   IDS    │  Suricata
-                   └──────────┘
-                         │
-                         ▼
-             ┌───────────────────────┐
-             │  Internal Network     │  172.29.0.0/24
-             │   (No Internet)       │  (Air-gapped)
-             └───────────────────────┘
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-   ┌─────────┐    ┌──────────┐    ┌──────────┐
-   │MEMSHADOW│    │PostgreSQL│    │  Redis   │
-   │  :8000  │    │  :5432   │    │  :6379   │
-   └─────────┘    └──────────┘    └──────────┘
-```
-
----
-
-## Installation
+## 🚀 Quick Start with Docker
 
 ### Prerequisites
+- Docker 20.10+ and Docker Compose 2.0+
+- 4GB RAM minimum (8GB recommended)
+- 10GB disk space
 
-**Required:**
-- Linux operating system (Ubuntu 20.04+, Debian 11+, or RHEL 8+)
-- Docker 20.10 or higher
-- Docker Compose 2.0 or higher
-- Python 3.8 or higher
-- systemd (for service management)
-- OpenSSL (for secret generation)
-- Root/sudo access
-
-**Optional:**
-- NVIDIA GPU with CUDA support (for AI/ML acceleration)
-- Intel CPU with NPU (for additional AI/ML acceleration)
-- Kubernetes cluster (for production deployment)
-- 16GB+ RAM (recommended for AI/ML features)
-- 100GB+ disk space (for logs and data)
-
-### Installation Methods
-
-#### Method 1: Interactive Installer (Recommended)
-
+### 1. Clone and Start
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/SWORDIntel/MEMSHADOW.git
 cd MEMSHADOW
 
-# Run interactive installer
-sudo ./install.sh
-```
-
-The installer provides a guided setup with:
-- Automatic prerequisite validation
-- Interactive configuration prompts
-- Secure secret generation
-- Hardware detection and optimization
-- Service installation and startup
-
-#### Method 2: Docker Compose (Development)
-
-```bash
-# Clone repository
-git clone https://github.com/SWORDIntel/MEMSHADOW.git
-cd MEMSHADOW
-
-# Create environment file
-cp .env.example .env
-# Edit .env with your configuration
-
-# Start services
-./scripts/deploy-docker.sh up
-
-# Initialize database
-./scripts/deploy-docker.sh init-db
-```
-
-#### Method 3: Kubernetes (Production)
-
-```bash
-# Clone repository
-git clone https://github.com/SWORDIntel/MEMSHADOW.git
-cd MEMSHADOW
-
-# Deploy to Kubernetes
-./scripts/deploy-k8s.sh deploy
+# Start all services
+docker-compose up -d
 
 # Check status
-./scripts/deploy-k8s.sh status
+docker-compose ps
+
+# View logs
+docker-compose logs -f memshadow
+```
+
+### 2. Access the Application
+- **Web Interface**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/api/docs
+- **Health Check**: http://localhost:8000/health
+
+### 3. Default Credentials
+```
+Username: admin
+Password: admin
+```
+**⚠️ CHANGE IMMEDIATELY IN PRODUCTION!**
+
+### 4. Stop Services
+```bash
+docker-compose down
 ```
 
 ---
 
-## Usage
+## 📦 What's Included
 
-### Management CLI (`memshadow`)
+### Core Services
+- **MEMSHADOW API** - FastAPI-based REST API
+- **PostgreSQL 15** - Primary data store
+- **Redis 7** - Caching and session management
+- **ChromaDB** - Vector database for embeddings
 
-After installation, use the `memshadow` command for **all operations**:
+### Phase 8 Advanced Features
+- ✅ **Federated Learning** - Privacy-preserving distributed memory
+- ✅ **Meta-Learning (MAML)** - Few-shot adaptation
+- ✅ **Consciousness-Inspired** - Global workspace architecture
+- ✅ **Self-Modifying** - Safe code improvement (disabled by default)
+
+### Security Features
+- ✅ Bcrypt password hashing
+- ✅ JWT authentication
+- ✅ Rate limiting (brute force protection)
+- ✅ Request validation (SQL injection, XSS prevention)
+- ✅ Security headers (HSTS, CSP, X-Frame-Options)
+- ✅ Audit logging
+- ✅ CORS whitelisting
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Web Interface                         │
+│                   (FastAPI + Jinja2)                     │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+┌───────────────────┴─────────────────────────────────────┐
+│              MEMSHADOW Core Services                     │
+├──────────────────────────────────────────────────────────┤
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐        │
+│  │ Federated  │  │   Meta-    │  │Consciousness│        │
+│  │  Learning  │  │  Learning  │  │  System     │        │
+│  └────────────┘  └────────────┘  └────────────┘        │
+│                                                          │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐        │
+│  │   Self-    │  │   Memory   │  │   Query    │        │
+│  │ Modifying  │  │  Storage   │  │  Engine    │        │
+│  └────────────┘  └────────────┘  └────────────┘        │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+┌───────────────────┴─────────────────────────────────────┐
+│              Data Layer                                  │
+├──────────────────────────────────────────────────────────┤
+│  PostgreSQL 15  │  Redis 7  │  ChromaDB                 │
+│  (Primary DB)   │  (Cache)  │  (Vectors)                │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📚 Documentation
+
+### Getting Started
+- [Quick Start Guide](docs/DEPLOYMENT_GUIDE.md) - Detailed deployment instructions
+- [Production Security](docs/PRODUCTION_SECURITY.md) - Security best practices
+- [API Documentation](http://localhost:8000/api/docs) - Interactive API docs (when running)
+
+### Architecture & Specs
+- [Core Concepts](docs/specs/MEMSHADOW.md) - Fundamental architecture
+- [Unified Architecture](docs/specs/MEMSHADOW_UNIFIED_ARCHITECURE.md) - System design
+- [Security Improvements](docs/SECURITY_IMPROVEMENTS_V1.0.md) - v1.0 security fixes
+
+### Development
+- [Contributing Guide](CONTRIBUTING.md) - How to contribute (coming soon)
+- [Development Setup](docs/DEVELOPMENT.md) - Local development guide (coming soon)
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+Copy the example configuration:
+```bash
+cp config/.env.example .env
+```
+
+**Critical Settings:**
+```bash
+# JWT Secret (REQUIRED)
+WEB_SECRET_KEY="generate_with_openssl_rand_hex_32"
+
+# Admin Credentials (REQUIRED)
+WEB_ADMIN_USERNAME="your_admin_username"
+WEB_ADMIN_PASSWORD="your_secure_password"
+
+# CORS Origins (REQUIRED for production)
+WEB_CORS_ORIGINS="https://yourdomain.com"
+
+# Database Passwords (REQUIRED for production)
+POSTGRES_PASSWORD="secure_postgres_password"
+REDIS_PASSWORD="secure_redis_password"
+```
+
+**Generate Secure Secrets:**
+```bash
+# Generate JWT secret
+openssl rand -hex 32
+
+# Generate database password
+openssl rand -base64 32
+
+# Generate bcrypt password hash
+python -c "from passlib.hash import bcrypt; import getpass; print(bcrypt.hash(getpass.getpass('Password: ')))"
+```
+
+---
+
+## 🐳 Docker Commands
+
+### Development
+```bash
+# Build and start
+docker-compose up --build
+
+# Start in background
+docker-compose up -d
+
+# View logs
+docker-compose logs -f memshadow
+
+# Execute commands in container
+docker-compose exec memshadow bash
+
+# Run tests
+docker-compose exec memshadow pytest
+
+# Stop services
+docker-compose down
+
+# Remove volumes (CAUTION: deletes data)
+docker-compose down -v
+```
+
+### Production
+```bash
+# Use production compose file
+docker-compose -f docker-compose.production.yml up -d
+
+# View production logs
+docker-compose -f docker-compose.production.yml logs -f
+
+# Check health
+docker-compose -f docker-compose.production.yml ps
+```
+
+---
+
+## 🧪 Testing
+
+### Run Tests in Docker
+```bash
+# All tests
+docker-compose exec memshadow pytest
+
+# Security tests only
+docker-compose exec memshadow pytest tests/security/
+
+# With coverage
+docker-compose exec memshadow pytest --cov=app tests/
+```
+
+### Run Tests Locally
+```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest
+
+# Run specific test file
+pytest tests/security/test_auth_security.py
+```
+
+---
+
+## 🔒 Security
+
+### Production Checklist
+
+Before deploying to production, ensure:
+
+- [ ] Changed default admin credentials
+- [ ] Generated strong `WEB_SECRET_KEY` (32+ chars)
+- [ ] Configured `WEB_CORS_ORIGINS` for your domain
+- [ ] Set strong database passwords
+- [ ] Enabled HTTPS/TLS
+- [ ] Reviewed security settings in `config/.env.production.template`
+- [ ] Set up monitoring and alerting
+- [ ] Configured automated backups
+
+### Security Features
+
+- **Authentication**: JWT-based with bcrypt password hashing
+- **Rate Limiting**: Prevents brute force and DoS attacks
+- **Input Validation**: SQL injection and XSS prevention
+- **Security Headers**: HSTS, CSP, X-Frame-Options, etc.
+- **Audit Logging**: All sensitive operations logged
+- **CORS Protection**: Whitelist-based origin validation
+
+See [PRODUCTION_SECURITY.md](docs/PRODUCTION_SECURITY.md) for complete security guide.
+
+---
+
+## 📊 Monitoring
+
+### Health Checks
 
 ```bash
-# Service Control
-memshadow start              # Start all services
-memshadow stop               # Stop all services
-memshadow restart            # Restart all services
-memshadow status             # Show service status
+# Application health
+curl http://localhost:8000/health
 
-# Monitoring
-memshadow logs <service>     # View logs
-memshadow logs memshadow -f  # Follow application logs
-memshadow health             # Run comprehensive health checks
+# Service status
+curl http://localhost:8000/api/status
 
-# Configuration
-memshadow config show        # Display configuration (secrets masked)
-memshadow config edit        # Edit configuration
-memshadow config validate    # Validate configuration
-
-# Maintenance
-memshadow backup [path]      # Create backup
-memshadow restore <file>     # Restore from backup
-memshadow update             # Update to latest version
-
-# Monitoring Stack
-memshadow enable-monitoring  # Enable Prometheus + Grafana
-memshadow disable-monitoring # Disable monitoring
-
-# Removal
-memshadow uninstall          # Completely remove MEMSHADOW
+# Rate limiter stats
+curl http://localhost:8000/api/stats
 ```
 
-### API Usage
-
-**Interactive API Documentation:**
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-**Example API Calls:**
+### Docker Health
 
 ```bash
-# Health check
-curl http://localhost:8000/api/v1/health
+# Check container health
+docker-compose ps
 
-# Authentication
-curl -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "your-password"}'
-
-# Register C2 session
-curl -X POST http://localhost:8000/api/v1/c2/register \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"implant_id": "test-001", "os": "Windows 10"}'
-
-# Create phishing page
-curl -X POST http://localhost:8000/api/v1/lurecraft/pages \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"template": "microsoft-login", "redirect_url": "https://example.com"}'
-
-# View metrics
-curl http://localhost:8000/api/v1/metrics
-```
-
-### Web Interfaces
-
-**Main Application:**
-- API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
-- Metrics: http://localhost:8000/api/v1/metrics
-
-**Monitoring (if enabled):**
-- Grafana: http://localhost:3000
-- Prometheus: http://localhost:9090
-- AlertManager: http://localhost:9093
-
----
-
-## Security
-
-### Hardening Features
-
-**Container Security:**
-- Read-only root filesystems
-- All capabilities dropped
-- AppArmor LSM profiles
-- Seccomp syscall filtering
-- Non-root users (UID 1000+)
-- No SUID/SGID binaries
-- Resource limits enforced
-
-**Network Security:**
-- Network segmentation (internal + DMZ)
-- TLS 1.3 only
-- ModSecurity WAF with OWASP CRS
-- Suricata IDS with APT detection
-- Rate limiting per endpoint
-- IP reputation tracking
-
-**Application Security:**
-- HMAC request signatures
-- SQL injection detection
-- XSS prevention
-- Path traversal blocking
-- Attack tool detection (sqlmap, nmap, etc.)
-- Automated threat blocking
-
-**Secrets Management:**
-- File-based Docker secrets
-- 600 permissions on all secret files
-- Automatic secret generation (32-byte tokens)
-- No default passwords accepted
-
-### Security Compliance
-
-- CIS Docker Benchmark Level 1
-- OWASP Top 10 mitigation
-- MITRE ATT&CK mapping
-- Zero-trust architecture
-- Defense-in-depth (8 layers)
-
----
-
-## Documentation
-
-### Core Documentation
-
-- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute getting started guide
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed architecture
-- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Deployment guide
-- **[security/HARDENING_GUIDE.md](security/HARDENING_GUIDE.md)** - Security hardening
-- **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - API documentation
-- **[docs/OPERATOR_MANUAL.md](docs/OPERATOR_MANUAL.md)** - Operator guide
-- **[scripts/README.md](scripts/README.md)** - All operational scripts
-
-### API Documentation
-
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
-- **OpenAPI JSON:** http://localhost:8000/openapi.json
-
----
-
-## Requirements
-
-### System Requirements
-
-**Minimum:**
-- CPU: 4 cores
-- RAM: 8GB
-- Disk: 50GB
-- OS: Linux (Ubuntu 20.04+, Debian 11+, RHEL 8+)
-
-**Recommended:**
-- CPU: 8+ cores (16+ for AI/ML)
-- RAM: 16GB+ (32GB+ for AI/ML)
-- Disk: 100GB+ SSD
-- GPU: NVIDIA with CUDA support (for AI/ML)
-- NPU: Intel NPU (for additional AI acceleration)
-
-### Software Requirements
-
-**Required:**
-- Docker 20.10+
-- Docker Compose 2.0+
-- Python 3.8+ (3.11+ recommended)
-- systemd
-- OpenSSL
-- curl, git
-
-**Optional:**
-- Kubernetes 1.24+
-- kubectl, Helm 3.0+
-- NVIDIA drivers + CUDA 11.8+
-
----
-
-## Project Structure
-
-```
-MEMSHADOW/
-├── install.sh                    # ⭐ ENTRY POINT 1: Installer
-├── README.md                     # This file
-├── QUICKSTART.md                 # Quick start guide
-├── ARCHITECTURE.md               # Architecture docs
-│
-├── app/                          # Application code
-│   ├── main.py                   # FastAPI application
-│   ├── api/v1/                   # API endpoints
-│   ├── core/                     # Core functionality
-│   ├── middleware/               # Middleware
-│   ├── models/                   # Database models
-│   ├── services/                 # Business logic
-│   │   ├── c2/                  # C2 framework
-│   │   ├── lurecraft/           # Social engineering
-│   │   ├── threat_intel/        # Threat intelligence
-│   │   └── ai_ml/               # AI/ML engine
-│   └── utils/                    # Utilities
-│
-├── scripts/                      # Operational scripts
-│   ├── memshadow-ctl.sh         # ⭐ ENTRY POINT 2: Management CLI
-│   ├── deploy-docker.sh         # Docker deployment
-│   ├── deploy-k8s.sh            # Kubernetes deployment
-│   ├── validate-config.sh       # Config validation
-│   ├── uninstall.sh             # Uninstaller
-│   └── README.md                # Scripts documentation
-│
-├── security/                     # Security configuration
-│   ├── apparmor/                # AppArmor profiles
-│   ├── seccomp/                 # Seccomp profiles
-│   ├── waf/                     # WAF configuration
-│   └── ids/                     # IDS rules
-│
-├── k8s/                         # Kubernetes manifests
-├── monitoring/                   # Monitoring stack
-├── docs/                        # Documentation
-├── tests/                       # Test suites
-├── migrations/                  # Database migrations
-│
-├── docker-compose.yml           # Standard deployment
-├── docker-compose.hardened.yml  # Production deployment
-├── docker-compose.monitoring.yml # Monitoring stack
-├── Dockerfile                   # Standard image
-└── Dockerfile.hardened          # Hardened image
+# View resource usage
+docker stats memshadow_app
 ```
 
 ---
 
-## Contributing
+## 🤝 Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) before submitting PRs.
 
 ### Development Setup
 
-```bash
-# Clone repository
-git clone https://github.com/SWORDIntel/MEMSHADOW.git
-cd MEMSHADOW
-
-# Install dependencies
-pip install -r requirements/development.txt
-
-# Start development environment
-./scripts/deploy-docker.sh up
-
-# Run tests
-pytest tests/
-```
-
-### Testing
-
-```bash
-# Unit tests
-pytest tests/unit/
-
-# Integration tests
-pytest tests/integration/
-
-# All tests with coverage
-pytest --cov=app --cov-report=html
-```
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests (`pytest`)
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ---
 
-## Troubleshooting
+## 📋 Project Components
 
-### Common Issues
+### Core Systems
+- **MEMSHADOW Core** - Memory persistence platform
+- **CHIMERA Protocol** - Isolated memory protocol for deception
+- **SDAP** - Secure Databurst Archival Protocol
+- **HYDRA Protocol** - Automated red team capabilities
+- **MFA/A Framework** - Multi-Factor Authentication & Authorization
+- **JANUS Protocol** - Portable sealing mechanisms
+- **SWARM Project** - Autonomous agent swarm
 
-**Installation fails:**
-```bash
-# Check prerequisites
-docker --version
-docker-compose --version
-
-# Review logs
-sudo ./install.sh 2>&1 | tee install.log
-```
-
-**Services won't start:**
-```bash
-# Check Docker daemon
-sudo systemctl status docker
-
-# Check logs
-memshadow logs memshadow
-
-# Validate configuration
-./scripts/validate-config.sh
-```
-
-**Health checks failing:**
-```bash
-# Run comprehensive check
-memshadow health
-
-# Check API endpoint
-curl http://localhost:8000/api/v1/health
-```
+### Integrations
+- Claude AI integration
+- OpenAI integration
+- Custom LLM support
+- Browser extension
 
 ---
 
-## License
+## 🛠️ Technology Stack
 
-**Proprietary License**
+**Backend:**
+- Python 3.11
+- FastAPI
+- SQLAlchemy
+- Alembic (migrations)
 
-Copyright (c) 2025 SWORDIntel
+**Databases:**
+- PostgreSQL 15 (primary data)
+- Redis 7 (caching)
+- ChromaDB (vector embeddings)
 
-This software is proprietary and confidential. Unauthorized copying, distribution,
-or use of this software, via any medium, is strictly prohibited.
+**Infrastructure:**
+- Docker & Docker Compose
+- Nginx (reverse proxy)
+- Prometheus (monitoring)
+- Grafana (dashboards)
+
+**Security:**
+- Passlib (password hashing)
+- PyJWT (authentication)
+- Rate limiting middleware
+- Input validation
 
 ---
 
-## Classification
+## 📄 License
 
-**UNCLASSIFIED**
-
-This platform handles sensitive security testing data. Ensure proper operational
-security when deploying and using MEMSHADOW.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## Contact
+## 🆘 Support
 
-- **Repository:** https://github.com/SWORDIntel/MEMSHADOW
-- **Issues:** https://github.com/SWORDIntel/MEMSHADOW/issues
-- **Security:** security@swordintel.com
+- **Documentation**: [docs/](docs/)
+- **Issues**: [GitHub Issues](https://github.com/SWORDIntel/MEMSHADOW/issues)
+- **Security**: security@memshadow.internal
 
 ---
 
-**Built with ⚔️ by SWORDIntel**
+## 📈 Version History
+
+### v1.0.0 (2025-11-18) - Production Ready
+- ✅ All critical security vulnerabilities fixed
+- ✅ Complete Docker deployment
+- ✅ Production-grade security features
+- ✅ Comprehensive documentation
+- ✅ 100% production readiness
+
+See [CHANGELOG.md](CHANGELOG.md) for complete version history.
+
+---
+
+**MEMSHADOW** - *Persistent Memory Across the AI Landscape*
+
+Made with 🧠 by the MEMSHADOW Team

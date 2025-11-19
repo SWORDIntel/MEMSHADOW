@@ -38,23 +38,3 @@ class MemoryResponse(MemoryInDBBase):
 class MemoryInDB(MemoryInDBBase):
     content_hash: str
     embedding: Optional[List[float]] = None
-
-
-# Document upload response
-class DocumentUploadResponse(BaseModel):
-    """Response for document upload endpoint"""
-    task_id: str
-    filename: str
-    file_size: int
-    status: str
-    message: str
-
-
-# Document processing status
-class DocumentProcessingStatus(BaseModel):
-    """Status of document processing task"""
-    task_id: str
-    status: str  # PENDING, STARTED, PROGRESS, SUCCESS, FAILURE
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    progress: Optional[Dict[str, Any]] = None
