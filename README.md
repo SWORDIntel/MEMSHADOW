@@ -1,3 +1,4 @@
+````markdown
 # MEMSHADOW 🧠
 
 **Advanced Cross-LLM Memory Persistence Platform**
@@ -34,13 +35,13 @@ docker-compose ps
 
 # View logs
 docker-compose logs -f memshadow
-```
+````
 
 ### 2. Access the Application
 
-- **Web Interface**: http://localhost:8000  
-- **API Documentation**: http://localhost:8000/api/docs  
-- **Health Check**: http://localhost:8000/health  
+* **Web Interface**: [http://localhost:8000](http://localhost:8000)
+* **API Documentation**: [http://localhost:8000/api/docs](http://localhost:8000/api/docs)
+* **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
 
 ### 3. Default Credentials
 
@@ -63,27 +64,27 @@ docker-compose down
 
 ### Core Services
 
-- **MEMSHADOW API** - FastAPI-based REST API  
-- **PostgreSQL 15** - Primary data store  
-- **Redis 7** - Caching and session management  
-- **ChromaDB** - Vector database for embeddings  
+* **MEMSHADOW API** - FastAPI-based REST API
+* **PostgreSQL 15** - Primary data store
+* **Redis 7** - Caching and session management
+* **ChromaDB** - Vector database for embeddings
 
 ### Phase 8 Advanced Features
 
-- ✅ **Federated Learning** - Privacy-preserving distributed memory  
-- ✅ **Meta-Learning (MAML)** - Few-shot adaptation  
-- ✅ **Consciousness-Inspired** - Global workspace architecture  
-- ✅ **Self-Modifying** - Safe code improvement (disabled by default)  
+* ✅ **Federated Learning** - Privacy-preserving distributed memory
+* ✅ **Meta-Learning (MAML)** - Few-shot adaptation
+* ✅ **Consciousness-Inspired** - Global workspace architecture
+* ✅ **Self-Modifying** - Safe code improvement (disabled by default)
 
 ### Security Features
 
-- ✅ Bcrypt password hashing  
-- ✅ JWT authentication  
-- ✅ Rate limiting (brute force protection)  
-- ✅ Request validation (SQL injection, XSS prevention)  
-- ✅ Security headers (HSTS, CSP, X-Frame-Options)  
-- ✅ Audit logging  
-- ✅ CORS whitelisting  
+* ✅ Bcrypt password hashing
+* ✅ JWT authentication
+* ✅ Rate limiting (brute force protection)
+* ✅ Request validation (SQL injection, XSS prevention)
+* ✅ Security headers (HSTS, CSP, X-Frame-Options)
+* ✅ Audit logging
+* ✅ CORS whitelisting
 
 ---
 
@@ -91,21 +92,21 @@ docker-compose down
 
 ```mermaid
 flowchart TD
-  UI[Web Interface (FastAPI + Jinja2)]
+  UI["Web Interface (FastAPI + Jinja2)"]
 
   subgraph CORE["MEMSHADOW Core Services"]
-    FL[Federated Learning]
-    ML[Meta-Learning]
-    CS[Consciousness System]
-    SM[Self-Modifying Engine]
-    MS[Memory Storage]
-    QE[Query Engine]
+    FL["Federated Learning"]
+    ML["Meta-Learning"]
+    CS["Consciousness System"]
+    SM["Self-Modifying Engine"]
+    MS["Memory Storage"]
+    QE["Query Engine"]
   end
 
   subgraph DATA["Data Layer"]
-    PG[(PostgreSQL 15 - Primary DB)]
-    RD[(Redis 7 - Cache)]
-    CH[(ChromaDB - Vectors)]
+    PG["PostgreSQL 15 (Primary DB)"]
+    RD["Redis 7 (Cache)"]
+    CH["ChromaDB (Vectors)"]
   end
 
   UI --> CORE
@@ -121,20 +122,20 @@ flowchart TD
 
 ### Getting Started
 
-- [Quick Start Guide](docs/DEPLOYMENT_GUIDE.md) - Detailed deployment instructions  
-- [Production Security](docs/PRODUCTION_SECURITY.md) - Security best practices  
-- [API Documentation](http://localhost:8000/api/docs) - Interactive API docs (when running)  
+* [Quick Start Guide](docs/DEPLOYMENT_GUIDE.md) - Detailed deployment instructions
+* [Production Security](docs/PRODUCTION_SECURITY.md) - Security best practices
+* [API Documentation](http://localhost:8000/api/docs) - Interactive API docs (when running)
 
 ### Architecture & Specs
 
-- [Core Concepts](docs/specs/MEMSHADOW.md) - Fundamental architecture  
-- [Unified Architecture](docs/specs/MEMSHADOW_UNIFIED_ARCHITECURE.md) - System design  
-- [Security Improvements](docs/SECURITY_IMPROVEMENTS_V1.0.md) - v1.0 security fixes  
+* [Core Concepts](docs/specs/MEMSHADOW.md) - Fundamental architecture
+* [Unified Architecture](docs/specs/MEMSHADOW_UNIFIED_ARCHITECURE.md) - System design
+* [Security Improvements](docs/SECURITY_IMPROVEMENTS_V1.0.md) - v1.0 security fixes
 
 ### Development
 
-- [Contributing Guide](CONTRIBUTING.md) - How to contribute (coming soon)  
-- [Development Setup](docs/DEVELOPMENT.md) - Local development guide (coming soon)  
+* [Contributing Guide](CONTRIBUTING.md) - How to contribute (coming soon)
+* [Development Setup](docs/DEVELOPMENT.md) - Local development guide (coming soon)
 
 ---
 
@@ -259,23 +260,23 @@ pytest tests/security/test_auth_security.py
 
 Before deploying to production, ensure:
 
-- [ ] Changed default admin credentials  
-- [ ] Generated strong `WEB_SECRET_KEY` (32+ chars)  
-- [ ] Configured `WEB_CORS_ORIGINS` for your domain  
-- [ ] Set strong database passwords  
-- [ ] Enabled HTTPS/TLS  
-- [ ] Reviewed security settings in `config/.env.production.template`  
-- [ ] Set up monitoring and alerting  
-- [ ] Configured automated backups  
+* [ ] Changed default admin credentials
+* [ ] Generated strong `WEB_SECRET_KEY` (32+ chars)
+* [ ] Configured `WEB_CORS_ORIGINS` for your domain
+* [ ] Set strong database passwords
+* [ ] Enabled HTTPS/TLS
+* [ ] Reviewed security settings in `config/.env.production.template`
+* [ ] Set up monitoring and alerting
+* [ ] Configured automated backups
 
 ### Security Features
 
-- **Authentication**: JWT-based with bcrypt password hashing  
-- **Rate Limiting**: Prevents brute force and DoS attacks  
-- **Input Validation**: SQL injection and XSS prevention  
-- **Security Headers**: HSTS, CSP, X-Frame-Options, etc.  
-- **Audit Logging**: All sensitive operations logged  
-- **CORS Protection**: Whitelist-based origin validation  
+* **Authentication**: JWT-based with bcrypt password hashing
+* **Rate Limiting**: Prevents brute force and DoS attacks
+* **Input Validation**: SQL injection and XSS prevention
+* **Security Headers**: HSTS, CSP, X-Frame-Options, etc.
+* **Audit Logging**: All sensitive operations logged
+* **CORS Protection**: Whitelist-based origin validation
 
 See [PRODUCTION_SECURITY.md](docs/PRODUCTION_SECURITY.md) for complete security guide.
 
@@ -314,13 +315,13 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ### Development Setup
 
-1. Fork the repository  
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)  
-3. Make your changes  
-4. Run tests (`pytest`)  
-5. Commit changes (`git commit -m 'Add amazing feature'`)  
-6. Push to branch (`git push origin feature/amazing-feature`)  
-7. Open a Pull Request  
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests (`pytest`)
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ---
 
@@ -328,20 +329,20 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ### Core Systems
 
-- **MEMSHADOW Core** - Memory persistence platform  
-- **CHIMERA Protocol** - Isolated memory protocol for deception  
-- **SDAP** - Secure Databurst Archival Protocol  
-- **HYDRA Protocol** - Automated red team capabilities  
-- **MFA/A Framework** - Multi-Factor Authentication & Authorization  
-- **JANUS Protocol** - Portable sealing mechanisms  
-- **SWARM Project** - Autonomous agent swarm  
+* **MEMSHADOW Core** - Memory persistence platform
+* **CHIMERA Protocol** - Isolated memory protocol for deception
+* **SDAP** - Secure Databurst Archival Protocol
+* **HYDRA Protocol** - Automated red team capabilities
+* **MFA/A Framework** - Multi-Factor Authentication & Authorization
+* **JANUS Protocol** - Portable sealing mechanisms
+* **SWARM Project** - Autonomous agent swarm
 
 ### Integrations
 
-- Claude AI integration  
-- OpenAI integration  
-- Custom LLM support  
-- Browser extension  
+* Claude AI integration
+* OpenAI integration
+* Custom LLM support
+* Browser extension
 
 ---
 
@@ -349,30 +350,30 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 **Backend:**
 
-- Python 3.11  
-- FastAPI  
-- SQLAlchemy  
-- Alembic (migrations)  
+* Python 3.11
+* FastAPI
+* SQLAlchemy
+* Alembic (migrations)
 
 **Databases:**
 
-- PostgreSQL 15 (primary data)  
-- Redis 7 (caching)  
-- ChromaDB (vector embeddings)  
+* PostgreSQL 15 (primary data)
+* Redis 7 (caching)
+* ChromaDB (vector embeddings)
 
 **Infrastructure:**
 
-- Docker & Docker Compose  
-- Nginx (reverse proxy)  
-- Prometheus (monitoring)  
-- Grafana (dashboards)  
+* Docker & Docker Compose
+* Nginx (reverse proxy)
+* Prometheus (monitoring)
+* Grafana (dashboards)
 
 **Security:**
 
-- Passlib (password hashing)  
-- PyJWT (authentication)  
-- Rate limiting middleware  
-- Input validation  
+* Passlib (password hashing)
+* PyJWT (authentication)
+* Rate limiting middleware
+* Input validation
 
 ---
 
@@ -384,9 +385,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support
 
-- **Documentation**: [docs/](docs/)  
-- **Issues**: [GitHub Issues](https://github.com/SWORDIntel/MEMSHADOW/issues)  
-- **Security**: security@memshadow.internal  
+* **Documentation**: [docs/](docs/)
+* **Issues**: [GitHub Issues](https://github.com/SWORDIntel/MEMSHADOW/issues)
+* **Security**: [security@memshadow.internal](mailto:security@memshadow.internal)
 
 ---
 
@@ -394,11 +395,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### v1.0.0 (2025-11-18) - Production Ready
 
-- ✅ All critical security vulnerabilities fixed  
-- ✅ Complete Docker deployment  
-- ✅ Production-grade security features  
-- ✅ Comprehensive documentation  
-- ✅ 100% production readiness  
+* ✅ All critical security vulnerabilities fixed
+* ✅ Complete Docker deployment
+* ✅ Production-grade security features
+* ✅ Comprehensive documentation
+* ✅ 100% production readiness
 
 See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
@@ -407,3 +408,6 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 **MEMSHADOW** - *Persistent Memory Across the AI Landscape*
 
 Made with 🧠 by the MEMSHADOW Team
+
+```
+```
