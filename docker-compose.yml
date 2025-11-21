@@ -113,6 +113,18 @@ services:
       CELERY_BROKER_URL: "redis://:memshadow_dev_password@redis:6379/1"
       CELERY_RESULT_BACKEND: "redis://:memshadow_dev_password@redis:6379/1"
 
+      # Embedding Configuration (2048d Production-Grade)
+      EMBEDDING_BACKEND: "sentence-transformers"
+      EMBEDDING_MODEL: "BAAI/bge-large-en-v1.5"
+      EMBEDDING_DIMENSION: "2048"
+      EMBEDDING_USE_PROJECTION: "true"
+      EMBEDDING_CACHE_TTL: "3600"
+
+      # Advanced NLP Configuration
+      USE_ADVANCED_NLP: "true"
+      NLP_QUERY_EXPANSION: "true"
+      SEMANTIC_SIMILARITY_THRESHOLD: "0.7"
+
       # Features
       ENABLE_FEDERATED_LEARNING: "true"
       ENABLE_META_LEARNING: "true"

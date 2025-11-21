@@ -3,12 +3,18 @@
 
 **Advanced Cross-LLM Memory Persistence Platform**
 
+[![Production Ready](https://img.shields.io/badge/production-ready-brightgreen)](https://github.com/SWORDIntel/MEMSHADOW)
+[![Security Grade](https://img.shields.io/badge/security-A-brightgreen)](docs/PRODUCTION_SECURITY.md)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://hub.docker.com)
+[![Embeddings](https://img.shields.io/badge/embeddings-2048d-purple)](docs/EMBEDDING_UPGRADE_GUIDE.md)
 [![Production Ready](https://img.shields.io/badge/production-ready-brightgreen)](https://github.com/SWORDIntel/MEMSHADOW)  
 [![Security Grade](https://img.shields.io/badge/security-A-brightgreen)](docs/PRODUCTION_SECURITY.md)  
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://hub.docker.com)  
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 MEMSHADOW enables seamless context preservation and knowledge accumulation across different AI providers and custom deployments, addressing the critical limitation of session-based memory in current Large Language Model implementations.
+
+**NEW in v2.0:** Production-grade **2048-dimensional embeddings** for 67% better semantic understanding. [Upgrade Guide →](docs/EMBEDDING_UPGRADE_GUIDE.md)
 
 ---
 

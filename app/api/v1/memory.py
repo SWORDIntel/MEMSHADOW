@@ -1,10 +1,11 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 from uuid import UUID
 
 from app.api.dependencies import get_current_active_user, get_db
+from app.services.corpus_importer import import_corpus_from_upload, ImportResult, CorpusImporter
 from app.schemas.memory import (
     MemoryCreate,
     MemoryResponse,
@@ -154,3 +155,61 @@ async def delete_memory(
 
     logger.info("Memory deleted", user_id=str(current_user.id), memory_id=str(memory_id))
     return None
+
+
+@router.post("/import", response_model=ImportResult)
+async def import_corpus(
+    *,
+    file: UploadFile = File(...),
+    format: str = Form("auto"),
+    current_user: User = Depends(get_current_active_user)
+) -> ImportResult:
+    """
+    Import a chat corpus to pre-seed memory system.
+
+    Supported formats: chatgpt, claude, json, jsonl, csv, markdown, text, auto
+    """
+    content = await file.read()
+
+    result = await import_corpus_from_upload(
+        user_id=str(current_user.id),
+        content=content,
+        filename=file.filename or "upload.txt",
+        format=format
+    )
+
+    logger.info(
+        "Corpus import completed",
+        user_id=str(current_user.id),
+        total=result.total_messages,
+        imported=result.imported_messages
+    )
+
+    return result
+
+
+@router.post("/import/directory", response_model=ImportResult)
+async def import_corpus_directory(
+    *,
+    directory: str = Form(...),
+    recursive: bool = Form(True),
+    current_user: User = Depends(get_current_active_user)
+) -> ImportResult:
+    """
+    Import all corpus files from a directory (for manually uploaded .zip extracts).
+
+    Place your corpus files in the directory, then trigger this endpoint.
+    Supports: .json, .jsonl, .csv, .md, .txt, .zip
+    """
+    importer = CorpusImporter(user_id=str(current_user.id))
+    result = await importer.import_directory(directory, recursive=recursive)
+
+    logger.info(
+        "Directory import completed",
+        user_id=str(current_user.id),
+        directory=directory,
+        total=result.total_messages,
+        imported=result.imported_messages
+    )
+
+    return result

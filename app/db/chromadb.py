@@ -13,7 +13,13 @@ class ChromaDBClient:
         self.collection = None
 
     async def init_client(self):
-        """Initialize ChromaDB client"""
+        """
+        Initialize ChromaDB client with support for configurable embedding dimensions
+
+        ChromaDB automatically handles variable-dimension vectors, so we don't need
+        to explicitly configure the dimension. The collection metadata tracks the
+        expected dimension for validation purposes.
+        """
         try:
             self.client = chromadb.HttpClient(
                 host=settings.CHROMA_HOST,
@@ -24,14 +30,34 @@ class ChromaDBClient:
                 )
             )
 
-            # Get or create collection
+            # Collection metadata includes embedding configuration
+            collection_metadata = {
+                "hnsw:space": "cosine",  # Cosine similarity for semantic search
+                "embedding_dimension": settings.EMBEDDING_DIMENSION,
+                "embedding_model": settings.EMBEDDING_MODEL,
+                "embedding_backend": settings.EMBEDDING_BACKEND,
+                "projection_enabled": settings.EMBEDDING_USE_PROJECTION
+            }
+
+            # Get or create collection with updated metadata
             self.collection = self.client.get_or_create_collection(
                 name=settings.CHROMA_COLLECTION,
-                metadata={"hnsw:space": "cosine"}
+                metadata=collection_metadata
             )
 
-            logger.info("ChromaDB client initialized",
-                       collection=settings.CHROMA_COLLECTION)
+            # Verify collection is ready
+            collection_count = self.collection.count()
+
+            logger.info(
+                "ChromaDB client initialized",
+                collection=settings.CHROMA_COLLECTION,
+                embedding_dimension=settings.EMBEDDING_DIMENSION,
+                embedding_model=settings.EMBEDDING_MODEL,
+                backend=settings.EMBEDDING_BACKEND,
+                existing_vectors=collection_count,
+                distance_metric="cosine"
+            )
+
         except Exception as e:
             logger.error("ChromaDB initialization failed", error=str(e))
             raise
@@ -47,14 +73,38 @@ class ChromaDBClient:
         embedding: List[float],
         metadata: Dict[str, Any]
     ):
-        """Add embedding to ChromaDB"""
+        """
+        Add embedding to ChromaDB with dimension validation
+
+        Args:
+            memory_id: Unique identifier for the memory
+            embedding: Embedding vector
+            metadata: Metadata to store with the embedding
+        """
         try:
+            # Validate embedding dimension
+            if len(embedding) != settings.EMBEDDING_DIMENSION:
+                logger.error(
+                    "Embedding dimension mismatch",
+                    memory_id=memory_id,
+                    expected=settings.EMBEDDING_DIMENSION,
+                    actual=len(embedding)
+                )
+                raise ValueError(
+                    f"Embedding dimension mismatch: expected {settings.EMBEDDING_DIMENSION}, "
+                    f"got {len(embedding)}"
+                )
+
             self.collection.add(
                 embeddings=[embedding],
                 ids=[memory_id],
                 metadatas=[metadata]
             )
-            logger.debug("Embedding added", memory_id=memory_id)
+            logger.debug(
+                "Embedding added",
+                memory_id=memory_id,
+                dimension=len(embedding)
+            )
         except Exception as e:
             logger.error("Failed to add embedding",
                         memory_id=memory_id,
