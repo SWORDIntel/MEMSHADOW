@@ -4,7 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 import structlog
 
-from app.api.v1 import auth, memory, health, task_reminders
+
+from app.api.v1 import auth, memory, health, openai_compat , task_reminders
+
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db import postgres, chromadb, redis
@@ -68,6 +70,7 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(memory.router, prefix=f"{settings.API_V1_STR}/memory", tags=["memory"])
+app.include_router(openai_compat.router, prefix="/v1", tags=["openai"])
 app.include_router(task_reminders.router, prefix=f"{settings.API_V1_STR}/reminders", tags=["reminders"])
 
 @app.get("/")
