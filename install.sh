@@ -1,637 +1,503 @@
-#!/bin/bash
-# MEMSHADOW Interactive Installation Wizard
-# Single entry point for complete system setup
-# Classification: UNCLASSIFIED
+#!/usr/bin/env bash
+#
+# MEMSHADOW Interactive Installer v2.0
+# ====================================
+# Configures API keys, generates secrets, sets up Docker, and runs migrations.
+#
+# Usage:
+#   ./install.sh                    # Interactive mode
+#   ./install.sh --quick            # Quick install with defaults
+#   ./install.sh --headless         # Non-interactive with env vars
+#   ./install.sh --help             # Show help
+#
+# Environment Variables (for --headless mode):
+#   MEMSHADOW_ADMIN_USER, MEMSHADOW_ADMIN_PASS, MEMSHADOW_DB_PASS,
+#   MEMSHADOW_REDIS_PASS, MEMSHADOW_EMBEDDING_BACKEND, OPENAI_API_KEY
+#
 
-set -e
-
-# ============================================================================
-# Configuration
-# ============================================================================
-
-INSTALL_DIR="/opt/memshadow"
-SERVICE_NAME="memshadow"
-SERVICE_USER="memshadow"
-DATA_DIR="/var/lib/memshadow"
-LOG_DIR="/var/log/memshadow"
-CONFIG_DIR="/etc/memshadow"
-SECRETS_FILE="$CONFIG_DIR/secrets.env"
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
+NC='\033[0m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+
+# Defaults
+DEFAULT_ADMIN_USER="admin"
+DEFAULT_DB_USER="memshadow"
+DEFAULT_DB_NAME="memshadow"
+DEFAULT_EMBEDDING_BACKEND="sentence-transformers"
+DEFAULT_EMBEDDING_MODEL="BAAI/bge-large-en-v1.5"
+DEFAULT_EMBEDDING_DIM="2048"
+
+# Modes
+INTERACTIVE=true
+QUICK_MODE=false
+SKIP_DOCKER=false
+SKIP_MIGRATION=false
+RUN_AFTER=false
 
 # ============================================================================
-# Banner
+# Helpers
 # ============================================================================
 
-show_banner() {
-    clear
-    echo -e "${CYAN}${BOLD}"
-    cat << "EOF"
-╔══════════════════════════════════════════════════════════════════════════╗
-║                                                                          ║
-║   ███╗   ███╗███████╗███╗   ███╗███████╗██╗  ██╗ █████╗ ██████╗  ██████╗║
-║   ████╗ ████║██╔════╝████╗ ████║██╔════╝██║  ██║██╔══██╗██╔══██╗██╔═══██╗
-║   ██╔████╔██║█████╗  ██╔████╔██║███████╗███████║███████║██║  ██║██║   ██║
-║   ██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║╚════██║██╔══██║██╔══██║██║  ██║██║   ██║
-║   ██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║███████║██║  ██║██║  ██║██████╔╝╚██████╔╝
-║   ╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ║
-║                                                                          ║
-║              Offensive Security Platform - Installation Wizard          ║
-║                        Version 2.1 - APT-Grade                          ║
-║                      Classification: UNCLASSIFIED                        ║
-║                                                                          ║
-╚══════════════════════════════════════════════════════════════════════════╝
+print_banner() {
+    echo -e "${PURPLE}"
+    cat << 'EOF'
+    __  __ _____ __  __ ____  _   _    _    ____   _____        __
+   |  \/  | ____|  \/  / ___|| | | |  / \  |  _ \ / _ \ \      / /
+   | |\/| |  _| | |\/| \___ \| |_| | / _ \ | | | | | | \ \ /\ / /
+   | |  | | |___| |  | |___) |  _  |/ ___ \| |_| | |_| |\ V  V /
+   |_|  |_|_____|_|  |_|____/|_| |_/_/   \_\____/ \___/  \_/\_/
+
+   Advanced Cross-LLM Memory Persistence Platform v2.0
+   2048d Embeddings | Production Ready
 EOF
     echo -e "${NC}"
-    echo ""
 }
 
-# ============================================================================
-# Utility Functions
-# ============================================================================
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+log_step()    { echo -e "\n${CYAN}${BOLD}==> $1${NC}"; }
 
-print_header() {
-    echo -e "\n${BLUE}${BOLD}═══ $1 ═══${NC}\n"
+generate_secret() {
+    openssl rand -base64 "${1:-32}" 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c "${1:-32}"
 }
 
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ${NC} $1"
+generate_password() {
+    openssl rand -base64 32 2>/dev/null | tr -dc 'a-zA-Z0-9!@#%' | head -c "${1:-20}"
 }
 
 prompt_input() {
-    local prompt="$1"
-    local default="$2"
-    local result
+    local prompt="$1" default="${2:-}" var="$3" secret="${4:-false}"
+    local value
 
-    if [ -n "$default" ]; then
-        read -p "$(echo -e ${CYAN}${prompt}${NC} [${default}]: )" result
-        echo "${result:-$default}"
+    if [[ "$secret" == "true" ]]; then
+        read -s -p "$prompt: " value; echo
+    elif [[ -n "$default" ]]; then
+        read -p "$prompt [$default]: " value
     else
-        read -p "$(echo -e ${CYAN}${prompt}${NC}: )" result
-        echo "$result"
+        read -p "$prompt: " value
     fi
-}
 
-prompt_secret() {
-    local prompt="$1"
-    local result
-
-    read -s -p "$(echo -e ${CYAN}${prompt}${NC}: )" result
-    echo ""  # New line after password input
-    echo "$result"
+    [[ -z "$value" && -n "$default" ]] && value="$default"
+    eval "$var=\"$value\""
 }
 
 prompt_yes_no() {
-    local prompt="$1"
-    local default="$2"
-    local result
+    local prompt="$1" default="${2:-y}"
+    local response
 
-    if [ "$default" = "y" ]; then
-        read -p "$(echo -e ${CYAN}${prompt}${NC} [Y/n]: )" result
-        result="${result:-y}"
-    else
-        read -p "$(echo -e ${CYAN}${prompt}${NC} [y/N]: )" result
-        result="${result:-n}"
-    fi
-
-    [[ "$result" =~ ^[Yy]$ ]]
+    [[ "$default" == "y" ]] && read -p "$prompt [Y/n]: " response || read -p "$prompt [y/N]: " response
+    [[ -z "$response" ]] && response="$default"
+    [[ "$response" =~ ^[Yy] ]]
 }
 
-generate_secret() {
-    python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-}
+check_deps() {
+    log_step "Checking Dependencies"
 
-# ============================================================================
-# Prerequisite Checks
-# ============================================================================
+    local missing=()
+    command -v docker &>/dev/null || missing+=("docker")
+    (command -v docker-compose &>/dev/null || docker compose version &>/dev/null) || missing+=("docker-compose")
 
-check_prerequisites() {
-    print_header "Checking Prerequisites"
-
-    local missing_deps=()
-
-    # Check if running as root
-    if [ "$EUID" -ne 0 ]; then
-        print_error "This script must be run as root"
-        echo "Please run: sudo ./install.sh"
-        exit 1
-    fi
-    print_success "Running as root"
-
-    # Check OS
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        print_success "OS: $PRETTY_NAME"
-    else
-        print_error "Cannot detect OS"
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_error "Missing: ${missing[*]}"
+        echo "Install Docker: https://docs.docker.com/get-docker/"
         exit 1
     fi
 
-    # Check Docker
-    if command -v docker &> /dev/null; then
-        DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,//')
-        print_success "Docker: $DOCKER_VERSION"
-    else
-        print_error "Docker not found"
-        missing_deps+=("docker")
-    fi
+    docker info &>/dev/null || { log_error "Docker not running"; exit 1; }
+    log_success "All dependencies OK"
+}
 
-    # Check Docker Compose
-    if command -v docker-compose &> /dev/null; then
-        COMPOSE_VERSION=$(docker-compose --version | awk '{print $4}')
-        print_success "Docker Compose: $COMPOSE_VERSION"
-    elif docker compose version &> /dev/null; then
-        COMPOSE_VERSION=$(docker compose version --short)
-        print_success "Docker Compose: $COMPOSE_VERSION"
-    else
-        print_error "Docker Compose not found"
-        missing_deps+=("docker-compose")
-    fi
+# ============================================================================
+# Configuration
+# ============================================================================
 
-    # Check Python 3
-    if command -v python3 &> /dev/null; then
-        PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-        print_success "Python 3: $PYTHON_VERSION"
-    else
-        print_error "Python 3 not found"
-        missing_deps+=("python3")
-    fi
+configure_admin() {
+    log_step "Admin Account"
 
-    # Check OpenSSL
-    if command -v openssl &> /dev/null; then
-        OPENSSL_VERSION=$(openssl version | awk '{print $2}')
-        print_success "OpenSSL: $OPENSSL_VERSION"
-    else
-        print_error "OpenSSL not found"
-        missing_deps+=("openssl")
-    fi
+    if [[ "$INTERACTIVE" == "true" ]]; then
+        prompt_input "Admin username" "$DEFAULT_ADMIN_USER" ADMIN_USER
 
-    # Check systemd
-    if command -v systemctl &> /dev/null; then
-        print_success "systemd detected"
+        if prompt_yes_no "Generate secure password?" "y"; then
+            ADMIN_PASS=$(generate_password 16)
+            echo -e "  Generated: ${BOLD}$ADMIN_PASS${NC} (save this!)"
+        else
+            prompt_input "Admin password (min 12 chars)" "" ADMIN_PASS "true"
+            while [[ ${#ADMIN_PASS} -lt 12 ]]; do
+                log_warn "Password too short (min 12)"
+                prompt_input "Admin password" "" ADMIN_PASS "true"
+            done
+        fi
     else
-        print_error "systemd not found (required for service installation)"
-        missing_deps+=("systemd")
+        ADMIN_USER="${MEMSHADOW_ADMIN_USER:-$DEFAULT_ADMIN_USER}"
+        ADMIN_PASS="${MEMSHADOW_ADMIN_PASS:-$(generate_password 16)}"
+        log_info "Admin: $ADMIN_USER"
     fi
+}
 
-    if [ ${#missing_deps[@]} -ne 0 ]; then
+configure_database() {
+    log_step "Database Configuration"
+
+    if [[ "$INTERACTIVE" == "true" ]]; then
+        prompt_input "PostgreSQL user" "$DEFAULT_DB_USER" DB_USER
+        prompt_input "PostgreSQL database" "$DEFAULT_DB_NAME" DB_NAME
+
+        if prompt_yes_no "Generate secure passwords?" "y"; then
+            DB_PASS=$(generate_password 24)
+            REDIS_PASS=$(generate_password 24)
+            log_info "Generated database passwords"
+        else
+            prompt_input "PostgreSQL password" "" DB_PASS "true"
+            prompt_input "Redis password" "" REDIS_PASS "true"
+        fi
+    else
+        DB_USER="${MEMSHADOW_DB_USER:-$DEFAULT_DB_USER}"
+        DB_NAME="${MEMSHADOW_DB_NAME:-$DEFAULT_DB_NAME}"
+        DB_PASS="${MEMSHADOW_DB_PASS:-$(generate_password 24)}"
+        REDIS_PASS="${MEMSHADOW_REDIS_PASS:-$(generate_password 24)}"
+    fi
+}
+
+configure_embeddings() {
+    log_step "Embedding Configuration (2048d)"
+
+    if [[ "$INTERACTIVE" == "true" ]]; then
         echo ""
-        print_error "Missing dependencies: ${missing_deps[*]}"
+        echo "  ${BOLD}1) sentence-transformers${NC} (Free, Local) - Recommended"
+        echo "  ${BOLD}2) openai${NC} (API, \$0.13/1M tokens)"
         echo ""
-        print_info "Install missing dependencies and try again"
-        exit 1
+        read -p "Select backend [1]: " choice
+
+        case "${choice:-1}" in
+            2)
+                EMBEDDING_BACKEND="openai"
+                EMBEDDING_MODEL="text-embedding-3-large"
+                EMBEDDING_USE_PROJECTION="false"
+
+                prompt_input "OpenAI API Key" "" OPENAI_API_KEY "true"
+                [[ -z "$OPENAI_API_KEY" ]] && log_warn "No API key - add to .env later"
+
+                echo "  Dimensions: 1) 1536  2) 2048  3) 3072"
+                read -p "Select [2]: " dim
+                case "${dim:-2}" in
+                    1) EMBEDDING_DIM="1536" ;;
+                    3) EMBEDDING_DIM="3072" ;;
+                    *) EMBEDDING_DIM="2048" ;;
+                esac
+                ;;
+            *)
+                EMBEDDING_BACKEND="sentence-transformers"
+                OPENAI_API_KEY=""
+
+                echo ""
+                echo "  Models:"
+                echo "    1) BAAI/bge-large-en-v1.5 (1024d->2048d) - Recommended"
+                echo "    2) thenlper/gte-large (1024d->2048d)"
+                echo "    3) all-mpnet-base-v2 (768d) - Faster"
+                echo "    4) paraphrase-multilingual (768d->2048d) - Multilingual"
+                read -p "Select [1]: " model
+
+                case "${model:-1}" in
+                    2) EMBEDDING_MODEL="thenlper/gte-large"; EMBEDDING_DIM="2048"; EMBEDDING_USE_PROJECTION="true" ;;
+                    3) EMBEDDING_MODEL="sentence-transformers/all-mpnet-base-v2"; EMBEDDING_DIM="768"; EMBEDDING_USE_PROJECTION="false" ;;
+                    4) EMBEDDING_MODEL="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"; EMBEDDING_DIM="2048"; EMBEDDING_USE_PROJECTION="true" ;;
+                    *) EMBEDDING_MODEL="$DEFAULT_EMBEDDING_MODEL"; EMBEDDING_DIM="$DEFAULT_EMBEDDING_DIM"; EMBEDDING_USE_PROJECTION="true" ;;
+                esac
+                ;;
+        esac
+    else
+        EMBEDDING_BACKEND="${MEMSHADOW_EMBEDDING_BACKEND:-$DEFAULT_EMBEDDING_BACKEND}"
+        EMBEDDING_MODEL="${MEMSHADOW_EMBEDDING_MODEL:-$DEFAULT_EMBEDDING_MODEL}"
+        EMBEDDING_DIM="${MEMSHADOW_EMBEDDING_DIM:-$DEFAULT_EMBEDDING_DIM}"
+        EMBEDDING_USE_PROJECTION="${MEMSHADOW_EMBEDDING_USE_PROJECTION:-true}"
+        OPENAI_API_KEY="${OPENAI_API_KEY:-}"
     fi
 
-    echo ""
-    print_success "All prerequisites met!"
+    log_info "Backend: $EMBEDDING_BACKEND | Model: $EMBEDDING_MODEL | Dim: ${EMBEDDING_DIM}d"
+}
+
+configure_security() {
+    log_step "Security Configuration"
+
+    SECRET_KEY=$(generate_secret 64)
+    WEB_SECRET_KEY=$(generate_secret 48)
+    FIELD_ENCRYPTION_KEY=$(generate_secret 32)
+
+    if [[ "$INTERACTIVE" == "true" ]]; then
+        prompt_yes_no "Enable security middleware?" "y" && ENABLE_SECURITY="true" || ENABLE_SECURITY="false"
+        prompt_input "CORS origins (comma-separated)" "http://localhost:3000,http://localhost:8080,http://localhost:8000" CORS_ORIGINS
+    else
+        ENABLE_SECURITY="true"
+        CORS_ORIGINS="${MEMSHADOW_CORS_ORIGINS:-http://localhost:3000,http://localhost:8080,http://localhost:8000}"
+    fi
+
+    log_success "Secrets generated"
+}
+
+configure_features() {
+    log_step "Feature Configuration"
+
+    if [[ "$INTERACTIVE" == "true" ]]; then
+        prompt_yes_no "Enable Federated Learning?" "y" && ENABLE_FEDERATED="true" || ENABLE_FEDERATED="false"
+        prompt_yes_no "Enable Meta-Learning (MAML)?" "y" && ENABLE_META="true" || ENABLE_META="false"
+        prompt_yes_no "Enable Consciousness Architecture?" "y" && ENABLE_CONSCIOUSNESS="true" || ENABLE_CONSCIOUSNESS="false"
+        prompt_yes_no "Enable Self-Modifying? (ADVANCED, risky)" "n" && ENABLE_SELF_MODIFYING="true" || ENABLE_SELF_MODIFYING="false"
+        prompt_yes_no "Enable Advanced NLP?" "y" && { USE_ADVANCED_NLP="true"; NLP_QUERY_EXPANSION="true"; } || { USE_ADVANCED_NLP="false"; NLP_QUERY_EXPANSION="false"; }
+    else
+        ENABLE_FEDERATED="${MEMSHADOW_FEDERATED:-true}"
+        ENABLE_META="${MEMSHADOW_META:-true}"
+        ENABLE_CONSCIOUSNESS="${MEMSHADOW_CONSCIOUSNESS:-true}"
+        ENABLE_SELF_MODIFYING="${MEMSHADOW_SELF_MODIFYING:-false}"
+        USE_ADVANCED_NLP="${MEMSHADOW_ADVANCED_NLP:-true}"
+        NLP_QUERY_EXPANSION="${MEMSHADOW_NLP_EXPANSION:-true}"
+    fi
 }
 
 # ============================================================================
-# Configuration Wizard
+# File Generation
 # ============================================================================
 
-collect_configuration() {
-    print_header "Configuration Wizard"
+generate_env() {
+    log_step "Generating .env"
 
-    print_info "This wizard will collect necessary configuration and secrets"
-    print_info "All sensitive data will be stored securely"
-    echo ""
+    cat > "$ENV_FILE" << EOF
+# MEMSHADOW Configuration - Generated $(date)
+# ============================================
 
-    # Deployment mode
-    print_info "Select deployment mode:"
-    echo "  1) Development (standard security)"
-    echo "  2) Production (APT-grade hardening)"
-    read -p "$(echo -e ${CYAN}Choice${NC} [1-2]: )" DEPLOY_MODE
-    DEPLOY_MODE=${DEPLOY_MODE:-2}
+# API
+PROJECT_NAME="MEMSHADOW"
+VERSION="2.0.0"
+API_V1_STR="/api/v1"
+SECRET_KEY="$SECRET_KEY"
+ACCESS_TOKEN_EXPIRE_MINUTES=11520
+BACKEND_CORS_ORIGINS="$CORS_ORIGINS"
 
-    if [ "$DEPLOY_MODE" = "2" ]; then
-        CONFIG[DEPLOY_MODE]="production"
-        CONFIG[COMPOSE_FILE]="docker-compose.hardened.yml"
-        print_success "Production mode selected (APT-grade hardening)"
-    else
-        CONFIG[DEPLOY_MODE]="development"
-        CONFIG[COMPOSE_FILE]="docker-compose.yml"
-        print_success "Development mode selected"
-    fi
-
-    echo ""
-
-    # Database Configuration
-    print_header "Database Configuration"
-
-    CONFIG[POSTGRES_USER]=$(prompt_input "PostgreSQL username" "memshadow")
-
-    if prompt_yes_no "Generate secure PostgreSQL password?" "y"; then
-        CONFIG[POSTGRES_PASSWORD]=$(generate_secret)
-        print_success "Secure password generated"
-    else
-        CONFIG[POSTGRES_PASSWORD]=$(prompt_secret "PostgreSQL password")
-    fi
-
-    CONFIG[POSTGRES_DB]=$(prompt_input "PostgreSQL database name" "memshadow")
-
-    echo ""
-
-    # Redis Configuration
-    print_header "Redis Configuration"
-
-    if prompt_yes_no "Generate secure Redis password?" "y"; then
-        CONFIG[REDIS_PASSWORD]=$(generate_secret)
-        print_success "Secure password generated"
-    else
-        CONFIG[REDIS_PASSWORD]=$(prompt_secret "Redis password")
-    fi
-
-    echo ""
-
-    # ChromaDB Configuration
-    print_header "ChromaDB Configuration"
-
-    if prompt_yes_no "Generate secure ChromaDB token?" "y"; then
-        CONFIG[CHROMA_TOKEN]=$(generate_secret)
-        print_success "Secure token generated"
-    else
-        CONFIG[CHROMA_TOKEN]=$(prompt_secret "ChromaDB token")
-    fi
-
-    echo ""
-
-    # Application Secrets
-    print_header "Application Secrets"
-
-    if prompt_yes_no "Generate application secret keys?" "y"; then
-        CONFIG[SECRET_KEY]=$(generate_secret)
-        CONFIG[JWT_SECRET_KEY]=$(generate_secret)
-        print_success "Secure keys generated"
-    else
-        CONFIG[SECRET_KEY]=$(prompt_secret "Application secret key")
-        CONFIG[JWT_SECRET_KEY]=$(prompt_secret "JWT secret key")
-    fi
-
-    echo ""
-
-    # AI/ML Configuration
-    print_header "AI/ML Configuration (130 TOPS)"
-
-    if prompt_yes_no "Enable AI/ML acceleration?" "y"; then
-        CONFIG[MEMSHADOW_AI_ENABLED]="true"
-
-        # Detect GPU
-        if command -v nvidia-smi &> /dev/null; then
-            GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
-            print_success "NVIDIA GPU detected: $GPU_NAME"
-            CONFIG[MEMSHADOW_AI_DEVICE]="cuda"
-        else
-            print_warning "No NVIDIA GPU detected"
-            CONFIG[MEMSHADOW_AI_DEVICE]="cpu"
-        fi
-
-        if prompt_yes_no "Enable Intel NPU support?" "n"; then
-            CONFIG[MEMSHADOW_NPU_ENABLED]="true"
-        else
-            CONFIG[MEMSHADOW_NPU_ENABLED]="false"
-        fi
-    else
-        CONFIG[MEMSHADOW_AI_ENABLED]="false"
-    fi
-
-    echo ""
-
-    # Threat Intelligence
-    print_header "Threat Intelligence Integration"
-
-    if prompt_yes_no "Enable threat intelligence feeds?" "y"; then
-        CONFIG[MEMSHADOW_THREAT_INTEL_ENABLED]="true"
-
-        # MISP
-        if prompt_yes_no "Configure MISP integration?" "n"; then
-            CONFIG[MISP_URL]=$(prompt_input "MISP URL" "")
-            CONFIG[MISP_KEY]=$(prompt_secret "MISP API key")
-            CONFIG[MEMSHADOW_MISP_ENABLED]="true"
-        else
-            CONFIG[MEMSHADOW_MISP_ENABLED]="false"
-        fi
-
-        # OpenCTI
-        if prompt_yes_no "Configure OpenCTI integration?" "n"; then
-            CONFIG[OPENCTI_URL]=$(prompt_input "OpenCTI URL" "")
-            CONFIG[OPENCTI_KEY]=$(prompt_secret "OpenCTI API key")
-            CONFIG[MEMSHADOW_OPENCTI_ENABLED]="true"
-        else
-            CONFIG[MEMSHADOW_OPENCTI_ENABLED]="false"
-        fi
-
-        # AbuseIPDB
-        if prompt_yes_no "Configure AbuseIPDB?" "n"; then
-            CONFIG[ABUSEIPDB_KEY]=$(prompt_secret "AbuseIPDB API key")
-        fi
-    else
-        CONFIG[MEMSHADOW_THREAT_INTEL_ENABLED]="false"
-    fi
-
-    echo ""
-
-    # Monitoring
-    print_header "Monitoring & Observability"
-
-    if prompt_yes_no "Enable monitoring stack (Prometheus + Grafana)?" "y"; then
-        CONFIG[ENABLE_MONITORING]="true"
-        CONFIG[GRAFANA_USER]=$(prompt_input "Grafana admin username" "admin")
-        CONFIG[GRAFANA_PASSWORD]=$(prompt_secret "Grafana admin password")
-    else
-        CONFIG[ENABLE_MONITORING]="false"
-    fi
-
-    echo ""
-
-    # Network Configuration
-    print_header "Network Configuration"
-
-    CONFIG[HTTP_PORT]=$(prompt_input "HTTP port" "80")
-    CONFIG[HTTPS_PORT]=$(prompt_input "HTTPS port" "443")
-    CONFIG[API_PORT]=$(prompt_input "API port (internal)" "8000")
-
-    echo ""
-    print_success "Configuration collected!"
-}
-
-# ============================================================================
-# Installation
-# ============================================================================
-
-declare -A CONFIG
-
-install_memshadow() {
-    print_header "Installing MEMSHADOW"
-
-    # Create directories
-    print_info "Creating directories..."
-    mkdir -p "$INSTALL_DIR"
-    mkdir -p "$DATA_DIR"/{postgres,redis,chromadb,data}
-    mkdir -p "$LOG_DIR"
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$CONFIG_DIR/secrets"
-    print_success "Directories created"
-
-    # Copy files
-    print_info "Installing application files..."
-    cp -r . "$INSTALL_DIR/"
-    chown -R root:root "$INSTALL_DIR"
-    print_success "Application files installed"
-
-    # Create service user
-    print_info "Creating service user..."
-    if ! id "$SERVICE_USER" &>/dev/null; then
-        useradd -r -s /bin/false -d "$DATA_DIR" "$SERVICE_USER"
-        print_success "User '$SERVICE_USER' created"
-    else
-        print_warning "User '$SERVICE_USER' already exists"
-    fi
-
-    # Set permissions
-    print_info "Setting permissions..."
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"
-    chmod 750 "$DATA_DIR"
-    chmod 750 "$LOG_DIR"
-    chmod 750 "$CONFIG_DIR"
-    chmod 700 "$CONFIG_DIR/secrets"
-    print_success "Permissions set"
-
-    # Generate secrets files
-    print_info "Generating secrets files..."
-    echo "${CONFIG[POSTGRES_PASSWORD]}" > "$CONFIG_DIR/secrets/postgres_password.txt"
-    echo "${CONFIG[REDIS_PASSWORD]}" > "$CONFIG_DIR/secrets/redis_password.txt"
-    echo "${CONFIG[CHROMA_TOKEN]}" > "$CONFIG_DIR/secrets/chroma_token.txt"
-    echo "${CONFIG[SECRET_KEY]}" > "$CONFIG_DIR/secrets/secret_key.txt"
-    echo "${CONFIG[JWT_SECRET_KEY]}" > "$CONFIG_DIR/secrets/jwt_secret_key.txt"
-    echo "postgresql://${CONFIG[POSTGRES_USER]}:${CONFIG[POSTGRES_PASSWORD]}@postgres:5432/${CONFIG[POSTGRES_DB]}" > "$CONFIG_DIR/secrets/database_url.txt"
-
-    chmod 600 "$CONFIG_DIR/secrets"/*
-    chown root:root "$CONFIG_DIR/secrets"/*
-    print_success "Secrets files created"
-
-    # Create environment file
-    print_info "Creating environment configuration..."
-    cat > "$SECRETS_FILE" << EOF
-# MEMSHADOW Configuration
-# Classification: UNCLASSIFIED
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-# Deployment
-DEPLOY_MODE=${CONFIG[DEPLOY_MODE]}
-ENVIRONMENT=${CONFIG[DEPLOY_MODE]}
-
-# Database
-POSTGRES_USER=${CONFIG[POSTGRES_USER]}
-POSTGRES_DB=${CONFIG[POSTGRES_DB]}
-POSTGRES_PASSWORD=${CONFIG[POSTGRES_PASSWORD]}
-DATABASE_URL=postgresql://${CONFIG[POSTGRES_USER]}:${CONFIG[POSTGRES_PASSWORD]}@postgres:5432/${CONFIG[POSTGRES_DB]}
+# PostgreSQL
+POSTGRES_SERVER=postgres
+POSTGRES_USER=$DB_USER
+POSTGRES_PASSWORD=$DB_PASS
+POSTGRES_DB=$DB_NAME
 
 # Redis
-REDIS_PASSWORD=${CONFIG[REDIS_PASSWORD]}
-REDIS_HOST=redis
-REDIS_PORT=6379
+REDIS_PASSWORD=$REDIS_PASS
+REDIS_URL="redis://:$REDIS_PASS@redis:6379/0"
 
 # ChromaDB
-CHROMA_TOKEN=${CONFIG[CHROMA_TOKEN]}
 CHROMA_HOST=chromadb
 CHROMA_PORT=8000
+CHROMA_COLLECTION="memshadow_memories"
 
-# Application
-SECRET_KEY=${CONFIG[SECRET_KEY]}
-JWT_SECRET_KEY=${CONFIG[JWT_SECRET_KEY]}
-PROJECT_NAME=MEMSHADOW
-VERSION=2.1
-
-# AI/ML
-MEMSHADOW_AI_ENABLED=${CONFIG[MEMSHADOW_AI_ENABLED]:-false}
-MEMSHADOW_AI_DEVICE=${CONFIG[MEMSHADOW_AI_DEVICE]:-cpu}
-MEMSHADOW_NPU_ENABLED=${CONFIG[MEMSHADOW_NPU_ENABLED]:-false}
-
-# Threat Intelligence
-MEMSHADOW_THREAT_INTEL_ENABLED=${CONFIG[MEMSHADOW_THREAT_INTEL_ENABLED]:-false}
-MEMSHADOW_MISP_ENABLED=${CONFIG[MEMSHADOW_MISP_ENABLED]:-false}
-MEMSHADOW_OPENCTI_ENABLED=${CONFIG[MEMSHADOW_OPENCTI_ENABLED]:-false}
-MISP_URL=${CONFIG[MISP_URL]:-}
-MISP_KEY=${CONFIG[MISP_KEY]:-}
-OPENCTI_URL=${CONFIG[OPENCTI_URL]:-}
-OPENCTI_KEY=${CONFIG[OPENCTI_KEY]:-}
-ABUSEIPDB_KEY=${CONFIG[ABUSEIPDB_KEY]:-}
+# Celery
+CELERY_BROKER_URL="redis://:$REDIS_PASS@redis:6379/1"
+CELERY_RESULT_BACKEND="redis://:$REDIS_PASS@redis:6379/1"
 
 # Security
-MEMSHADOW_APT_DEFENSE=${CONFIG[DEPLOY_MODE] == "production" && echo "enabled" || echo "disabled"}
-MEMSHADOW_WAF_ENABLED=${CONFIG[DEPLOY_MODE] == "production" && echo "true" || echo "false"}
+ALGORITHM="HS256"
+BCRYPT_ROUNDS=12
+FIELD_ENCRYPTION_KEY="$FIELD_ENCRYPTION_KEY"
+WEB_SECRET_KEY="$WEB_SECRET_KEY"
+WEB_TOKEN_EXPIRY_HOURS=24
+WEB_ADMIN_USERNAME="$ADMIN_USER"
+WEB_ADMIN_PASSWORD="$ADMIN_PASS"
+WEB_CORS_ORIGINS="$CORS_ORIGINS"
+ENABLE_SECURITY_MIDDLEWARE="$ENABLE_SECURITY"
 
-# Monitoring
-GRAFANA_USER=${CONFIG[GRAFANA_USER]:-admin}
-GRAFANA_PASSWORD=${CONFIG[GRAFANA_PASSWORD]:-}
+# MFA
+MFA_ISSUER="MEMSHADOW"
+FIDO2_RP_ID="localhost"
+FIDO2_RP_NAME="MEMSHADOW"
 
-# Network
-HTTP_PORT=${CONFIG[HTTP_PORT]}
-HTTPS_PORT=${CONFIG[HTTPS_PORT]}
-API_PORT=${CONFIG[API_PORT]}
+# SDAP
+SDAP_BACKUP_PATH="/var/backups/memshadow"
+SDAP_ARCHIVE_SERVER="backup.memshadow.internal"
+SDAP_GPG_KEY_ID=""
+
+# Embeddings (2048d)
+EMBEDDING_BACKEND="$EMBEDDING_BACKEND"
+EMBEDDING_MODEL="$EMBEDDING_MODEL"
+EMBEDDING_DIMENSION=$EMBEDDING_DIM
+EMBEDDING_USE_PROJECTION=$EMBEDDING_USE_PROJECTION
+EMBEDDING_CACHE_TTL=3600
+OPENAI_API_KEY="$OPENAI_API_KEY"
+OPENAI_EMBEDDING_MODEL="text-embedding-3-large"
+
+# Advanced NLP
+USE_ADVANCED_NLP=$USE_ADVANCED_NLP
+NLP_QUERY_EXPANSION=$NLP_QUERY_EXPANSION
+SEMANTIC_SIMILARITY_THRESHOLD=0.7
+
+# Features
+ENABLE_FEDERATED_LEARNING=$ENABLE_FEDERATED
+ENABLE_META_LEARNING=$ENABLE_META
+ENABLE_CONSCIOUSNESS=$ENABLE_CONSCIOUSNESS
+ENABLE_SELF_MODIFYING=$ENABLE_SELF_MODIFYING
+
+# Logging
+LOG_LEVEL=INFO
 EOF
 
-    chmod 600 "$SECRETS_FILE"
-    print_success "Environment configuration created"
+    chmod 600 "$ENV_FILE"
+    log_success "Created $ENV_FILE"
+}
 
-    # Create systemd service
-    print_info "Installing systemd service..."
-    cat > "/etc/systemd/system/$SERVICE_NAME.service" << EOF
-[Unit]
-Description=MEMSHADOW Offensive Security Platform
-Documentation=https://github.com/SWORDIntel/MEMSHADOW
-After=docker.service
-Requires=docker.service
+update_docker_compose() {
+    log_step "Updating docker-compose.yml"
 
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=$INSTALL_DIR
-EnvironmentFile=$SECRETS_FILE
+    local file="${SCRIPT_DIR}/docker-compose.yml"
+    [[ ! -f "$file" ]] && return
 
-# Start command
-ExecStart=/usr/bin/docker-compose -f ${CONFIG[COMPOSE_FILE]} up -d
-ExecStop=/usr/bin/docker-compose -f ${CONFIG[COMPOSE_FILE]} down
+    cp "$file" "${file}.backup"
 
-# Security
-User=root
-Group=root
-NoNewPrivileges=true
-PrivateTmp=true
+    sed -i "s/memshadow_dev_password/$DB_PASS/g" "$file"
+    sed -i "s|EMBEDDING_MODEL: \".*\"|EMBEDDING_MODEL: \"$EMBEDDING_MODEL\"|g" "$file"
+    sed -i "s|EMBEDDING_DIMENSION: \".*\"|EMBEDDING_DIMENSION: \"$EMBEDDING_DIM\"|g" "$file"
+    sed -i "s|EMBEDDING_BACKEND: \".*\"|EMBEDDING_BACKEND: \"$EMBEDDING_BACKEND\"|g" "$file"
+    sed -i "s|EMBEDDING_USE_PROJECTION: \".*\"|EMBEDDING_USE_PROJECTION: \"$EMBEDDING_USE_PROJECTION\"|g" "$file"
 
-# Restart policy
-Restart=on-failure
-RestartSec=10s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    print_success "Systemd service installed"
-
-    # Install management CLI
-    print_info "Installing management CLI..."
-    cp "$INSTALL_DIR/scripts/memshadow-ctl.sh" "/usr/local/bin/memshadow"
-    chmod +x "/usr/local/bin/memshadow"
-    print_success "Management CLI installed: memshadow"
-
-    print_success "Installation complete!"
+    log_success "Updated docker-compose.yml"
 }
 
 # ============================================================================
-# Post-Installation
+# Docker
 # ============================================================================
 
-post_install() {
-    print_header "Post-Installation Setup"
+build_and_run() {
+    [[ "$SKIP_DOCKER" == "true" ]] && return
 
-    # Enable service
-    if prompt_yes_no "Enable MEMSHADOW service on boot?" "y"; then
-        systemctl enable "$SERVICE_NAME.service"
-        print_success "Service enabled"
+    log_step "Building Containers"
+    cd "$SCRIPT_DIR"
+    docker compose build 2>/dev/null || docker-compose build
+    log_success "Build complete"
+
+    if [[ "$RUN_AFTER" == "true" ]] || { [[ "$INTERACTIVE" == "true" ]] && prompt_yes_no "Start services now?" "y"; }; then
+        log_step "Starting Services"
+        docker compose up -d 2>/dev/null || docker-compose up -d
+
+        echo -n "Waiting for health..."
+        for i in {1..30}; do
+            curl -sf http://localhost:8000/health &>/dev/null && { echo ""; log_success "MEMSHADOW is running!"; break; }
+            echo -n "."; sleep 2
+        done
+    fi
+}
+
+run_migration() {
+    [[ "$SKIP_MIGRATION" == "true" ]] && return
+
+    if [[ "$INTERACTIVE" == "true" ]]; then
+        echo ""
+        prompt_yes_no "Run embedding migration for existing data?" "n" || return
     fi
 
-    # Start service
-    if prompt_yes_no "Start MEMSHADOW now?" "y"; then
-        print_info "Starting MEMSHADOW..."
-        systemctl start "$SERVICE_NAME.service"
+    log_step "Running Migration"
+    cd "$SCRIPT_DIR"
+    docker compose run --rm memshadow python scripts/migrate_embeddings_to_2048d.py --batch-size 100 2>/dev/null || \
+    docker-compose run --rm memshadow python scripts/migrate_embeddings_to_2048d.py --batch-size 100
+}
 
-        # Wait for startup
-        print_info "Waiting for services to start (30s)..."
-        sleep 30
+# ============================================================================
+# Summary
+# ============================================================================
 
-        # Check status
-        if systemctl is-active --quiet "$SERVICE_NAME.service"; then
-            print_success "MEMSHADOW is running!"
-
-            echo ""
-            print_info "Access points:"
-            print_info "  Main API:       http://localhost:${CONFIG[API_PORT]}"
-            print_info "  API Docs:       http://localhost:${CONFIG[API_PORT]}/docs"
-            print_info "  C2 Framework:   https://localhost:8443"
-            print_info "  TEMPEST:        http://localhost:8080"
-
-            if [ "${CONFIG[ENABLE_MONITORING]}" = "true" ]; then
-                print_info "  Grafana:        http://localhost:3000"
-                print_info "  Prometheus:     http://localhost:9090"
-            fi
-        else
-            print_error "Service failed to start"
-            print_info "Check logs with: journalctl -u $SERVICE_NAME.service"
-        fi
-    fi
-
+print_summary() {
     echo ""
-    print_header "Installation Summary"
+    echo -e "${GREEN}${BOLD}======================================================${NC}"
+    echo -e "${GREEN}${BOLD}  MEMSHADOW Installation Complete!${NC}"
+    echo -e "${GREEN}${BOLD}======================================================${NC}"
+    echo ""
+    echo -e "  ${BOLD}Web Interface:${NC}     http://localhost:8000"
+    echo -e "  ${BOLD}API Docs:${NC}          http://localhost:8000/api/docs"
+    echo ""
+    echo -e "  ${BOLD}Admin:${NC}    ${CYAN}$ADMIN_USER${NC}"
+    echo -e "  ${BOLD}Password:${NC} ${CYAN}$ADMIN_PASS${NC}"
+    echo ""
+    echo -e "  ${BOLD}Embeddings:${NC} ${CYAN}$EMBEDDING_BACKEND${NC} / ${CYAN}${EMBEDDING_DIM}d${NC}"
+    echo -e "  ${BOLD}Model:${NC}      ${CYAN}$EMBEDDING_MODEL${NC}"
+    echo ""
+    echo -e "  ${BOLD}Config:${NC} ${CYAN}$ENV_FILE${NC}"
+    echo ""
+    echo -e "${YELLOW}  Save your admin password securely!${NC}"
+    echo ""
+    echo "Commands:"
+    echo "  docker compose ps      # Status"
+    echo "  docker compose logs    # Logs"
+    echo "  docker compose down    # Stop"
+    echo ""
+}
 
-    echo -e "${GREEN}MEMSHADOW Successfully Installed!${NC}"
-    echo ""
-    echo "Installation Directory: $INSTALL_DIR"
-    echo "Data Directory:         $DATA_DIR"
-    echo "Configuration:          $CONFIG_DIR"
-    echo "Logs:                   $LOG_DIR"
-    echo ""
-    echo "Management Commands:"
-    echo "  memshadow start       - Start services"
-    echo "  memshadow stop        - Stop services"
-    echo "  memshadow restart     - Restart services"
-    echo "  memshadow status      - Show status"
-    echo "  memshadow logs        - View logs"
-    echo "  memshadow update      - Update platform"
-    echo ""
-    echo -e "${YELLOW}IMPORTANT:${NC} Configuration stored in: $SECRETS_FILE"
-    echo -e "${YELLOW}Keep this file secure! It contains sensitive credentials.${NC}"
-    echo ""
-    echo -e "${CYAN}Classification: UNCLASSIFIED${NC}"
-    echo -e "${CYAN}For authorized security testing and defensive research only${NC}"
+print_help() {
+    cat << 'EOF'
+MEMSHADOW Installer v2.0
+
+Usage: ./install.sh [OPTIONS]
+
+Options:
+  --quick           Quick install with defaults
+  --headless        Non-interactive (uses env vars)
+  --skip-docker     Skip Docker build/start
+  --skip-migration  Skip embedding migration
+  --run             Start services after install
+  --help            Show this help
+
+Environment Variables (--headless):
+  MEMSHADOW_ADMIN_USER, MEMSHADOW_ADMIN_PASS
+  MEMSHADOW_DB_USER, MEMSHADOW_DB_PASS, MEMSHADOW_REDIS_PASS
+  MEMSHADOW_EMBEDDING_BACKEND, MEMSHADOW_EMBEDDING_MODEL
+  MEMSHADOW_EMBEDDING_DIM, OPENAI_API_KEY
+
+Examples:
+  ./install.sh                          # Interactive
+  ./install.sh --quick --run            # Quick with auto-start
+  MEMSHADOW_ADMIN_PASS=xxx ./install.sh --headless  # CI/CD
+EOF
 }
 
 # ============================================================================
 # Main
 # ============================================================================
 
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --quick) QUICK_MODE=true; INTERACTIVE=false ;;
+            --headless) INTERACTIVE=false ;;
+            --skip-docker) SKIP_DOCKER=true ;;
+            --skip-migration) SKIP_MIGRATION=true ;;
+            --run) RUN_AFTER=true ;;
+            --help|-h) print_help; exit 0 ;;
+            *) log_error "Unknown: $1"; print_help; exit 1 ;;
+        esac
+        shift
+    done
+}
+
 main() {
-    show_banner
-
-    print_warning "This will install MEMSHADOW as a system service"
-    print_warning "Requires root privileges and Docker"
-    echo ""
-
-    if ! prompt_yes_no "Continue with installation?" "y"; then
-        print_info "Installation cancelled"
-        exit 0
-    fi
-
-    check_prerequisites
-    collect_configuration
-    install_memshadow
-    post_install
-
-    echo ""
-    print_success "Installation wizard complete!"
-    echo ""
+    parse_args "$@"
+    print_banner
+    check_deps
+    configure_admin
+    configure_database
+    configure_embeddings
+    configure_security
+    configure_features
+    generate_env
+    update_docker_compose
+    build_and_run
+    run_migration
+    print_summary
 }
 
 main "$@"
