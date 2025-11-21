@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
+from enum import Enum
 from pydantic_settings import BaseSettings
 from pydantic import AnyHttpUrl, PostgresDsn, RedisDsn, field_validator
 import secrets
@@ -10,6 +11,20 @@ import secrets
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path)
+
+
+class MemoryOperationMode(str, Enum):
+    """
+    Operation modes for memory processing.
+
+    - LOCAL: Full enrichment, all features enabled (highest quality, slowest)
+    - ONLINE: Balanced speed/features (moderate enrichment, good performance)
+    - LIGHTWEIGHT: Minimal processing (fastest, basic features only)
+    """
+    LOCAL = "local"
+    ONLINE = "online"
+    LIGHTWEIGHT = "lightweight"
+
 
 class Settings(BaseSettings):
     # API Configuration
@@ -110,6 +125,9 @@ class Settings(BaseSettings):
     USE_ADVANCED_NLP: bool = True
     NLP_QUERY_EXPANSION: bool = True
     SEMANTIC_SIMILARITY_THRESHOLD: float = 0.7
+
+    # Memory Operation Mode Configuration
+    MEMORY_OPERATION_MODE: MemoryOperationMode = MemoryOperationMode.LOCAL
 
     class Config:
         case_sensitive = True

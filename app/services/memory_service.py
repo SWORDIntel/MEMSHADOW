@@ -10,7 +10,7 @@ from app.models.memory import Memory
 from app.db.chromadb import chroma_client
 from app.db.redis import redis_client
 from app.services.embedding_service import EmbeddingService
-from app.core.config import settings
+from app.core.config import settings, MemoryOperationMode
 
 logger = structlog.get_logger()
 
@@ -62,6 +62,9 @@ class MemoryService:
     async def generate_and_store_embedding(self, memory_id: UUID, content: str):
         """Generate and store embedding for a memory."""
         try:
+            # Check operation mode to determine processing level
+            mode = settings.MEMORY_OPERATION_MODE
+
             # Generate embedding
             embedding = await self.embedding_service.generate_embedding(content)
 
@@ -74,23 +77,36 @@ class MemoryService:
             # Update memory with embedding
             memory.embedding = embedding
 
-            # Add to ChromaDB
-            await chroma_client.add_embedding(
-                memory_id=str(memory.id),
-                embedding=embedding,
-                metadata={
-                    "user_id": str(memory.user_id),
-                    "created_at": memory.created_at.isoformat()
-                }
-            )
+            # Mode-specific storage strategies
+            if mode == MemoryOperationMode.LIGHTWEIGHT:
+                # LIGHTWEIGHT: Skip ChromaDB, only cache and PostgreSQL
+                logger.debug("LIGHTWEIGHT mode: Skipping ChromaDB storage", memory_id=str(memory_id))
+            else:
+                # LOCAL and ONLINE: Store in ChromaDB
+                await chroma_client.add_embedding(
+                    memory_id=str(memory.id),
+                    embedding=embedding,
+                    metadata={
+                        "user_id": str(memory.user_id),
+                        "created_at": memory.created_at.isoformat()
+                    }
+                )
 
-            # Cache the embedding in Redis
+            # Always cache the embedding in Redis (useful for all modes)
             cache_key = f"embedding:{memory_id}"
-            await redis_client.cache_set(cache_key, embedding, ttl=settings.EMBEDDING_CACHE_TTL)
+            cache_ttl = settings.EMBEDDING_CACHE_TTL
+
+            # ONLINE mode: Extended cache TTL for better performance
+            if mode == MemoryOperationMode.ONLINE:
+                cache_ttl = cache_ttl * 2
+
+            await redis_client.cache_set(cache_key, embedding, ttl=cache_ttl)
 
             await self.db.commit()
 
-            logger.info("Embedding generated and stored", memory_id=str(memory_id))
+            logger.info("Embedding generated and stored",
+                       memory_id=str(memory_id),
+                       mode=mode.value)
 
         except Exception as e:
             logger.error("Embedding generation failed", memory_id=str(memory_id), error=str(e))
@@ -106,53 +122,75 @@ class MemoryService:
         offset: int = 0
     ) -> List[Memory]:
         """Search memories using semantic similarity"""
+        mode = settings.MEMORY_OPERATION_MODE
+
         # Generate query embedding
         query_embedding = await self.embedding_service.generate_embedding(query)
 
-        # Search in ChromaDB
-        where_clause = {"user_id": str(user_id)}
-        if filters:
-            # This is a simple merge. For complex filters, you might need more logic.
-            where_clause.update(filters)
+        # Mode-specific search strategies
+        if mode == MemoryOperationMode.LIGHTWEIGHT:
+            # LIGHTWEIGHT: Use PostgreSQL vector search only (faster, less accurate)
+            from sqlalchemy import func
+            stmt = select(Memory).where(
+                Memory.user_id == user_id
+            ).order_by(
+                func.cosine_distance(Memory.embedding, query_embedding)
+            ).limit(limit).offset(offset)
 
-        results = await chroma_client.search_similar(
-            query_embedding=query_embedding,
-            n_results=limit + offset,
-            where=where_clause
-        )
+            result = await self.db.execute(stmt)
+            sorted_memories = list(result.scalars().all())
 
-        # Get memory IDs from results
-        memory_ids_str = results['ids'][0]
-        if not memory_ids_str:
-            return []
+        else:
+            # LOCAL and ONLINE: Use ChromaDB for hybrid search
+            where_clause = {"user_id": str(user_id)}
+            if filters:
+                where_clause.update(filters)
 
-        memory_ids = [UUID(mid) for mid in memory_ids_str][offset:offset + limit]
+            # ONLINE mode: Reduce n_results for faster search
+            search_limit = limit + offset
+            if mode == MemoryOperationMode.ONLINE:
+                search_limit = min(search_limit, limit * 2)  # Cap to reduce latency
 
-        if not memory_ids:
-            return []
+            results = await chroma_client.search_similar(
+                query_embedding=query_embedding,
+                n_results=search_limit,
+                where=where_clause
+            )
 
-        # Fetch memories from database
-        stmt = select(Memory).where(Memory.id.in_(memory_ids))
-        result = await self.db.execute(stmt)
-        memories = result.scalars().all()
+            # Get memory IDs from results
+            memory_ids_str = results['ids'][0]
+            if not memory_ids_str:
+                return []
 
-        # Sort by relevance score from ChromaDB
-        memory_dict = {m.id: m for m in memories}
-        sorted_memories = [memory_dict[mid] for mid in memory_ids if mid in memory_dict]
+            memory_ids = [UUID(mid) for mid in memory_ids_str][offset:offset + limit]
 
-        # Update access timestamps
-        for memory in sorted_memories:
-            memory.accessed_at = datetime.utcnow()
-            extra_data = memory.extra_data or {}
-            extra_data["access_count"] = extra_data.get("access_count", 0) + 1
-            memory.extra_data = extra_data
+            if not memory_ids:
+                return []
 
-        await self.db.commit()
+            # Fetch memories from database
+            stmt = select(Memory).where(Memory.id.in_(memory_ids))
+            result = await self.db.execute(stmt)
+            memories = result.scalars().all()
+
+            # Sort by relevance score from ChromaDB
+            memory_dict = {m.id: m for m in memories}
+            sorted_memories = [memory_dict[mid] for mid in memory_ids if mid in memory_dict]
+
+        # Update access timestamps (skip in LIGHTWEIGHT mode for speed)
+        if mode != MemoryOperationMode.LIGHTWEIGHT:
+            for memory in sorted_memories:
+                memory.accessed_at = datetime.utcnow()
+                extra_data = memory.extra_data or {}
+                extra_data["access_count"] = extra_data.get("access_count", 0) + 1
+                memory.extra_data = extra_data
+
+            await self.db.commit()
 
         logger.info("Memories searched",
                    user_id=str(user_id),
                    query=query[:50],
-                   results=len(sorted_memories))
+                   results=len(sorted_memories),
+                   mode=mode.value)
 
         return sorted_memories
 

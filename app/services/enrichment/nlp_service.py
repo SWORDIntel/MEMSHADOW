@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Optional
 import structlog
 from datetime import datetime
 import hashlib
+from app.core.config import settings, MemoryOperationMode
 
 logger = structlog.get_logger()
 
@@ -159,28 +160,57 @@ class NLPEnrichmentService:
     async def enrich_memory(self, content: str) -> Dict[str, Any]:
         """
         Comprehensive enrichment of memory content.
-        
+
         Returns all NLP enrichments in one go.
+        Processing level depends on MEMORY_OPERATION_MODE:
+        - LIGHTWEIGHT: Skip all enrichment (returns minimal data)
+        - ONLINE: Basic enrichment (entities, keywords, language only)
+        - LOCAL: Full enrichment (all features)
         """
-        logger.info("Starting comprehensive memory enrichment")
-        
+        mode = settings.MEMORY_OPERATION_MODE
+        logger.info("Starting memory enrichment", mode=mode.value)
+
+        # LIGHTWEIGHT mode: Skip enrichment entirely
+        if mode == MemoryOperationMode.LIGHTWEIGHT:
+            return {
+                "enriched_at": datetime.utcnow().isoformat(),
+                "mode": "lightweight",
+                "skipped": True
+            }
+
+        # ONLINE mode: Basic enrichment only
+        if mode == MemoryOperationMode.ONLINE:
+            enrichment = {
+                "entities": await self.extract_entities(content),
+                "keywords": await self.extract_keywords(content, top_n=5),  # Reduced count
+                "language": await self.detect_language(content),
+                "enriched_at": datetime.utcnow().isoformat(),
+                "mode": "online"
+            }
+
+            logger.info("Memory enrichment completed (ONLINE mode)",
+                       entities_count=len(enrichment["entities"]))
+            return enrichment
+
+        # LOCAL mode: Full enrichment
         enrichment = {
             "entities": await self.extract_entities(content),
             "sentiment": await self.analyze_sentiment(content),
             "keywords": await self.extract_keywords(content),
             "language": await self.detect_language(content),
             "relationships": await self.extract_relationships(content),
-            "enriched_at": datetime.utcnow().isoformat()
+            "enriched_at": datetime.utcnow().isoformat(),
+            "mode": "local"
         }
-        
+
         # Generate summary if content is long
         if len(content) > 500:
             enrichment["summary"] = await self.generate_summary(content)
-        
-        logger.info("Memory enrichment completed", 
+
+        logger.info("Memory enrichment completed (LOCAL mode)",
                    entities_count=len(enrichment["entities"]),
                    keywords_count=len(enrichment["keywords"]))
-        
+
         return enrichment
 
 
