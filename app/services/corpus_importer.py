@@ -20,6 +20,9 @@ import json
 import csv
 import re
 import asyncio
+import zipfile
+import tempfile
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from datetime import datetime
@@ -66,6 +69,7 @@ class CorpusImporter:
         "csv": "_parse_csv",
         "markdown": "_parse_markdown",
         "text": "_parse_text",
+        "zip": "_parse_zip",
         "auto": "_detect_and_parse"
     }
 
@@ -227,6 +231,11 @@ class CorpusImporter:
     async def _detect_and_parse(self, path: Path) -> List[ImportedMessage]:
         """Auto-detect format and parse"""
         suffix = path.suffix.lower()
+
+        # Handle zip files first (binary)
+        if suffix == '.zip':
+            return await self._parse_zip(path)
+
         content = path.read_text(encoding='utf-8', errors='ignore')
 
         # Try to detect format
@@ -484,6 +493,89 @@ class CorpusImporter:
                 ))
 
         return messages
+
+    async def _parse_zip(self, path: Path) -> List[ImportedMessage]:
+        """Parse zip archive containing multiple conversation files"""
+        messages = []
+        temp_dir = None
+
+        try:
+            temp_dir = tempfile.mkdtemp(prefix="memshadow_import_")
+
+            with zipfile.ZipFile(path, 'r') as zf:
+                zf.extractall(temp_dir)
+
+            # Recursively find and parse all supported files
+            temp_path = Path(temp_dir)
+            for file_path in temp_path.rglob('*'):
+                if file_path.is_file() and file_path.suffix.lower() in ['.json', '.jsonl', '.csv', '.md', '.txt']:
+                    try:
+                        file_messages = await self._detect_and_parse(file_path)
+                        # Add source file info to metadata
+                        for msg in file_messages:
+                            msg.metadata["source_file"] = file_path.name
+                        messages.extend(file_messages)
+                        logger.debug(f"Parsed {len(file_messages)} messages from {file_path.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse {file_path.name}: {e}")
+
+            logger.info(f"Extracted {len(messages)} total messages from zip")
+
+        finally:
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return messages
+
+    async def import_directory(
+        self,
+        dir_path: str,
+        recursive: bool = True,
+        **kwargs
+    ) -> ImportResult:
+        """
+        Import all supported files from a directory
+
+        Args:
+            dir_path: Path to directory containing corpus files
+            recursive: Search subdirectories
+            **kwargs: Additional arguments for import_file
+        """
+        start_time = datetime.utcnow()
+        self.stats = {"total": 0, "imported": 0, "failed": 0, "skipped": 0}
+        self.errors = []
+
+        path = Path(dir_path)
+        if not path.is_dir():
+            raise NotADirectoryError(f"Not a directory: {dir_path}")
+
+        supported_extensions = ['.json', '.jsonl', '.csv', '.md', '.txt', '.zip']
+        files = path.rglob('*') if recursive else path.glob('*')
+
+        for file_path in files:
+            if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+                logger.info(f"Processing: {file_path.name}")
+                try:
+                    result = await self.import_file(str(file_path), **kwargs)
+                    self.stats["total"] += result.total_messages
+                    self.stats["imported"] += result.imported_messages
+                    self.stats["failed"] += result.failed_messages
+                    self.stats["skipped"] += result.skipped_messages
+                    self.errors.extend(result.errors)
+                except Exception as e:
+                    self.errors.append(f"Failed to process {file_path.name}: {str(e)}")
+
+        duration = (datetime.utcnow() - start_time).total_seconds()
+
+        return ImportResult(
+            success=len(self.errors) == 0,
+            total_messages=self.stats["total"],
+            imported_messages=self.stats["imported"],
+            failed_messages=self.stats["failed"],
+            skipped_messages=self.stats["skipped"],
+            errors=self.errors,
+            duration_seconds=duration
+        )
 
 
 # =========================================================================

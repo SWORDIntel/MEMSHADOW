@@ -5,7 +5,7 @@ import structlog
 from uuid import UUID
 
 from app.api.dependencies import get_current_active_user, get_db
-from app.services.corpus_importer import import_corpus_from_upload, ImportResult
+from app.services.corpus_importer import import_corpus_from_upload, ImportResult, CorpusImporter
 from app.schemas.memory import (
     MemoryCreate,
     MemoryResponse,
@@ -181,6 +181,33 @@ async def import_corpus(
     logger.info(
         "Corpus import completed",
         user_id=str(current_user.id),
+        total=result.total_messages,
+        imported=result.imported_messages
+    )
+
+    return result
+
+
+@router.post("/import/directory", response_model=ImportResult)
+async def import_corpus_directory(
+    *,
+    directory: str = Form(...),
+    recursive: bool = Form(True),
+    current_user: User = Depends(get_current_active_user)
+) -> ImportResult:
+    """
+    Import all corpus files from a directory (for manually uploaded .zip extracts).
+
+    Place your corpus files in the directory, then trigger this endpoint.
+    Supports: .json, .jsonl, .csv, .md, .txt, .zip
+    """
+    importer = CorpusImporter(user_id=str(current_user.id))
+    result = await importer.import_directory(directory, recursive=recursive)
+
+    logger.info(
+        "Directory import completed",
+        user_id=str(current_user.id),
+        directory=directory,
         total=result.total_messages,
         imported=result.imported_messages
     )
