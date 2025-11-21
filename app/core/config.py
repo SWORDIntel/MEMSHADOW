@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # Corpus Import Configuration
     CORPUS_IMPORT_DIR: str = "/data/corpus"  # Autoscan directory (hourly)
 
+    # Local AI Configuration (OpenAI-compatible backend: ollama, llama.cpp, vllm)
+    LOCAL_AI_URL: str = "http://localhost:11434/v1"
+    LOCAL_AI_MODEL: str = "llama3.2"
+
     # Embedding Configuration
     # Backend options: "sentence-transformers", "openai", "cohere"
     EMBEDDING_BACKEND: str = "sentence-transformers"
