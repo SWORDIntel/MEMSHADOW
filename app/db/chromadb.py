@@ -128,8 +128,12 @@ class ChromaDBClient:
             metadatas: List of metadata dicts
         """
         try:
-            if len(memory_ids) != len(embeddings) != len(metadatas):
-                raise ValueError("memory_ids, embeddings, and metadatas must have the same length")
+            # Validate all lists have the same length
+            if not (len(memory_ids) == len(embeddings) == len(metadatas)):
+                raise ValueError(
+                    f"Length mismatch: memory_ids={len(memory_ids)}, "
+                    f"embeddings={len(embeddings)}, metadatas={len(metadatas)}"
+                )
 
             # Validate all embedding dimensions
             for i, embedding in enumerate(embeddings):
