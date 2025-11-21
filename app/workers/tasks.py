@@ -7,6 +7,7 @@ from celery import current_task
 from app.workers.celery_app import celery_app
 from app.db.postgres import AsyncSessionLocal
 from app.services.memory_service import MemoryService
+from app.services.task_reminder_service import TaskReminderService
 from app.core.config import settings
 
 logger = structlog.get_logger()
@@ -102,3 +103,82 @@ def autoscan_corpus_directory(self):
         return {"status": "success", "files_processed": len(files_to_process), "messages_imported": total_imported}
 
     return asyncio.run(async_scan())
+
+
+@celery_app.task(bind=True)
+def check_and_send_reminders(self):
+    """
+    Periodic task to check for due reminders and process them.
+    Runs every 5 minutes to check for pending reminders.
+    """
+    logger.info("Starting reminder check task", task_id=current_task.request.id)
+
+    async def async_check_reminders():
+        session = AsyncSessionLocal()
+        try:
+            service = TaskReminderService(session)
+
+            # Get all pending reminders that should be sent now
+            pending_reminders = await service.get_pending_reminders()
+
+            if not pending_reminders:
+                logger.debug("No pending reminders to process")
+                return {"status": "success", "reminders_sent": 0}
+
+            logger.info(f"Found {len(pending_reminders)} reminders to process")
+
+            sent_count = 0
+            for reminder in pending_reminders:
+                try:
+                    # In a real implementation, you would send actual notifications here
+                    # For example:
+                    # - Send email via SMTP
+                    # - Send push notification
+                    # - Create in-app notification
+                    # - Send webhook
+
+                    # For now, we'll just log and mark as reminded
+                    logger.info(
+                        "Reminder notification sent",
+                        reminder_id=str(reminder.id),
+                        user_id=str(reminder.user_id),
+                        title=reminder.title,
+                        priority=reminder.priority.value
+                    )
+
+                    # Mark reminder as sent
+                    await service.mark_as_reminded(reminder.id)
+                    sent_count += 1
+
+                    # Store notification in extra_data for retrieval via API
+                    extra_data = reminder.extra_data or {}
+                    extra_data["notification_sent"] = True
+                    extra_data["notification_method"] = "log"  # Would be 'email', 'push', etc.
+                    await session.commit()
+
+                except Exception as e:
+                    logger.error(
+                        "Failed to process reminder",
+                        reminder_id=str(reminder.id),
+                        error=str(e),
+                        exc_info=True
+                    )
+                    await session.rollback()
+
+            await session.commit()
+            logger.info("Reminder check task completed", reminders_sent=sent_count)
+
+            return {"status": "success", "reminders_sent": sent_count}
+
+        except Exception as e:
+            logger.error(
+                "Error during reminder check task",
+                error=str(e),
+                exc_info=True
+            )
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    return asyncio.run(async_check_reminders())
