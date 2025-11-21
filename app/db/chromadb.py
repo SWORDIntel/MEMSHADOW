@@ -2,8 +2,9 @@ import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Any, Optional
 import structlog
+from functools import lru_cache
 
-from app.core.config import settings
+from app.core.config import settings, MemoryOperationMode
 
 logger = structlog.get_logger()
 
@@ -109,6 +110,49 @@ class ChromaDBClient:
             logger.error("Failed to add embedding",
                         memory_id=memory_id,
                         error=str(e))
+            raise
+
+    async def add_embeddings_batch(
+        self,
+        memory_ids: List[str],
+        embeddings: List[List[float]],
+        metadatas: List[Dict[str, Any]]
+    ):
+        """
+        Add multiple embeddings to ChromaDB in a single batch operation.
+        Much more efficient than adding one at a time.
+
+        Args:
+            memory_ids: List of unique identifiers
+            embeddings: List of embedding vectors
+            metadatas: List of metadata dicts
+        """
+        try:
+            if len(memory_ids) != len(embeddings) != len(metadatas):
+                raise ValueError("memory_ids, embeddings, and metadatas must have the same length")
+
+            # Validate all embedding dimensions
+            for i, embedding in enumerate(embeddings):
+                if len(embedding) != settings.EMBEDDING_DIMENSION:
+                    raise ValueError(
+                        f"Embedding {i} dimension mismatch: expected {settings.EMBEDDING_DIMENSION}, "
+                        f"got {len(embedding)}"
+                    )
+
+            self.collection.add(
+                embeddings=embeddings,
+                ids=memory_ids,
+                metadatas=metadatas
+            )
+
+            logger.info(
+                "Batch embeddings added",
+                count=len(memory_ids),
+                dimension=settings.EMBEDDING_DIMENSION
+            )
+
+        except Exception as e:
+            logger.error("Failed to add batch embeddings", error=str(e))
             raise
 
     async def search_similar(

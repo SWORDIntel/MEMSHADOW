@@ -29,6 +29,10 @@ celery_app.conf.update(
             "task": "app.workers.tasks.autoscan_corpus_directory",
             "schedule": 3600,  # Every hour
         },
+        "check-reminders": {
+            "task": "app.workers.tasks.check_and_send_reminders",
+            "schedule": 300,  # Every 5 minutes
+        },
     },
 )
 
