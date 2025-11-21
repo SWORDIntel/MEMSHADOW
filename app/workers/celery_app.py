@@ -24,6 +24,12 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,  # 25 minutes
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+    beat_schedule={
+        "corpus-autoscan": {
+            "task": "app.workers.tasks.autoscan_corpus_directory",
+            "schedule": 3600,  # Every hour
+        },
+    },
 )
 
 @worker_process_init.connect

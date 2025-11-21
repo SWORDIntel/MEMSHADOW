@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     SDAP_ARCHIVE_SERVER: str = "backup.memshadow.internal"
     SDAP_GPG_KEY_ID: str = ""
 
+    # Corpus Import Configuration
+    CORPUS_IMPORT_DIR: str = "/data/corpus"  # Autoscan directory (hourly)
+
     # Embedding Configuration
     # Backend options: "sentence-transformers", "openai", "cohere"
     EMBEDDING_BACKEND: str = "sentence-transformers"
