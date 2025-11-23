@@ -133,6 +133,54 @@ class Settings(BaseSettings):
     # Memory Operation Mode Configuration
     MEMORY_OPERATION_MODE: MemoryOperationMode = MemoryOperationMode.LOCAL
 
+    # =============================================================
+    # Neural Storage Configuration - Brain-like Multi-Tiered System
+    # =============================================================
+
+    # Enable the neural storage system (multi-tiered brain-like storage)
+    NEURAL_STORAGE_ENABLED: bool = True
+
+    # Tiered Database Configuration
+    # Tier 0: Ultra-High Dimensional (4096d) - Archival, maximum fidelity
+    # Tier 1: High Dimensional (2048d) - Long-term storage
+    # Tier 2: Medium Dimensional (1024d) - Warm storage
+    # Tier 3: Low Dimensional (512d) - Hot compressed
+    # Tier 4: RAMDISK (256d) - Working memory
+    NEURAL_STORAGE_ENABLE_ULTRA_HIGH_TIER: bool = True
+    NEURAL_STORAGE_RAMDISK_MAX_MB: int = 512
+    NEURAL_STORAGE_RAMDISK_MIN_MB: int = 64
+
+    # Dynamic CPU Management
+    NEURAL_STORAGE_MIN_WORKERS: int = 1
+    NEURAL_STORAGE_MAX_WORKERS: Optional[int] = None  # None = auto-detect CPU count
+    NEURAL_STORAGE_TARGET_CPU_UTILIZATION: float = 0.7
+
+    # Memory Migration (Hot/Cold Storage)
+    NEURAL_STORAGE_PROMOTE_TEMPERATURE: float = 0.8  # Promote to faster tier if temp > this
+    NEURAL_STORAGE_DEMOTE_TEMPERATURE: float = 0.2   # Demote to slower tier if temp < this
+    NEURAL_STORAGE_MIN_AGE_FOR_DEMOTION_HOURS: float = 24.0
+    NEURAL_STORAGE_MAX_IDLE_HOURS_ARCHIVE: float = 168.0  # 1 week
+
+    # Neural Connection Engine (Brain-like pattern discovery)
+    NEURAL_STORAGE_SIMILARITY_THRESHOLD: float = 0.7
+    NEURAL_STORAGE_MAX_CONNECTIONS_PER_MEMORY: int = 100
+    NEURAL_STORAGE_HEBBIAN_LEARNING_RATE: float = 0.1
+    NEURAL_STORAGE_CONNECTION_DECAY_RATE: float = 0.01
+
+    # Cross-tier Deduplication
+    NEURAL_STORAGE_SEMANTIC_DEDUP_THRESHOLD: float = 0.95
+    NEURAL_STORAGE_NEAR_DUPLICATE_THRESHOLD: float = 0.85
+    NEURAL_STORAGE_AUTO_DEDUP_INTERVAL_MINUTES: int = 30
+
+    # Background Tasks
+    NEURAL_STORAGE_ENABLE_BACKGROUND_TASKS: bool = True
+    NEURAL_STORAGE_MAINTENANCE_INTERVAL_MINUTES: int = 15
+    NEURAL_STORAGE_CONNECTION_DISCOVERY_INTERVAL_MINUTES: int = 5
+
+    # Persistence
+    NEURAL_STORAGE_PERSISTENCE_PATH: str = "/var/lib/memshadow/neural_storage"
+    NEURAL_STORAGE_ENABLE_PERSISTENCE: bool = True
+
     class Config:
         case_sensitive = True
         env_file = ".env"
