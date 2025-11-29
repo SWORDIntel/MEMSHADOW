@@ -62,11 +62,17 @@ async def retrieve_memories(
     offset: int = Query(0, ge=0)
 ) -> List[MemoryResponse]:
     """
-    Retrieve memories using semantic search.
+    Retrieve memories using semantic search with metacognitive confidence scores.
+
+    Returns memories with optional confidence metadata that indicates:
+    - confidence: Overall confidence score (0-1)
+    - similarity_score: Semantic similarity to query
+    - uncertainty_sources: List of factors affecting confidence
+    - should_review: Whether human review is recommended
     """
     memory_service = MemoryService(db)
 
-    memories = await memory_service.search_memories(
+    memories, confidence_metadata = await memory_service.search_memories(
         user_id=current_user.id,
         query=search.query,
         filters=search.filters,
@@ -74,13 +80,32 @@ async def retrieve_memories(
         offset=offset
     )
 
+    # Construct response with confidence metadata
+    responses = []
+    for idx, memory in enumerate(memories):
+        # Get confidence metadata for this memory (if available)
+        confidence = confidence_metadata[idx] if confidence_metadata else None
+
+        # Create response object
+        response_data = {
+            "id": memory.id,
+            "user_id": memory.user_id,
+            "content": memory.content,
+            "extra_data": memory.extra_data,
+            "created_at": memory.created_at,
+            "updated_at": memory.updated_at,
+            "confidence_metadata": confidence
+        }
+        responses.append(MemoryResponse(**response_data))
+
     logger.info(
         "Memories retrieved",
         user_id=str(current_user.id),
-        count=len(memories)
+        count=len(memories),
+        with_confidence=confidence_metadata is not None
     )
 
-    return memories
+    return responses
 
 @router.get("/{memory_id}", response_model=MemoryResponse)
 async def get_memory(
