@@ -32,7 +32,7 @@ class MemoryService:
                 confidence_threshold=settings.METACOGNITIVE_CONFIDENCE_THRESHOLD,
                 low_similarity_threshold=settings.METACOGNITIVE_LOW_SIMILARITY_THRESHOLD
             )
-            logger.info("Metacognitive confidence v2 enabled (14 signals)")
+            logger.info("Metacognitive confidence v2+Phase2 enabled (21 signals)")
         else:
             self.signal_extractor = None
             self.confidence_aggregator = None
