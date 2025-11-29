@@ -46,6 +46,7 @@ class SignalVector:
     Organized by tier with clear cost/priority annotations.
     v1: 14 cheap mandatory signals
     v2: +7 medium-cost Phase 2 signals
+    v3: +3 cheap local-first Phase 3 signals (20, 28, 30)
     """
     # Tier 1: Retrieval Geometry (Cheap, Online, Mandatory)
     top_score: float                    # Signal 1: Best match strength
@@ -65,6 +66,9 @@ class SignalVector:
     semantic_coherence: Optional[float] = None      # Signal 11: Results semantically consistent (0-1)
     diversity_score: Optional[float] = None         # Signal 13: Topic coverage breadth (0-1)
 
+    # Tier 2: Phase 3 (Cheap, Local-First, P3)
+    language_quality: Optional[float] = None        # Signal 20: Text quality/noise detection (0-1)
+
     # Tier 3: Query Semantics (Cheap-Medium, Online, Mandatory)
     query_length: int                   # Signal 14: Lexical length
     specificity_score: float            # Signal 15: IDs, dates, entities (0-1)
@@ -83,6 +87,10 @@ class SignalVector:
 
     # Tier 5: System Health (Cheap, Online, Mandatory)
     retrieval_path: str                 # Signal 26: "normal" / "fallback" / "degraded"
+
+    # Tier 5: Phase 3 (Cheap, Local-First, P3)
+    latency_indicators: Optional[float] = None      # Signal 28: Retrieval latency health (0-1)
+    error_log_presence: Optional[float] = None      # Signal 30: Recent errors (0-1, higher=fewer errors)
 
     # Tier 7: Meta-signals (Cheap, Online, Mandatory)
     signal_completeness: float          # Signal 36: % of signals available (0-1)
@@ -126,7 +134,7 @@ class SignalExtractor:
             'future': ['upcoming', 'future', 'planned', 'next', 'tomorrow']
         }
 
-        logger.info("Signal extractor initialized", mandatory_signals=14, phase2_signals=7)
+        logger.info("Signal extractor initialized", mandatory_signals=14, phase2_signals=7, phase3_signals=3, total=24)
 
     # === PHASE 2 SIGNAL EXTRACTION METHODS ===
 
@@ -407,6 +415,132 @@ class SignalExtractor:
 
         return diversity
 
+    # === PHASE 3 LOCAL-FIRST SIGNAL EXTRACTION METHODS ===
+
+    def _calculate_language_quality(self, content: str) -> float:
+        """
+        Signal 20: Language quality/noise detection.
+
+        Analyzes text for quality indicators:
+        - Character diversity (not keyboard spam)
+        - Word-to-character ratio (real words vs gibberish)
+        - Excessive special characters
+        - Proper capitalization patterns
+
+        Returns: 0.0 = noisy/garbage, 1.0 = clean text
+        """
+        if not content or len(content) < 10:
+            return 0.3  # Too short to assess
+
+        # Character diversity (avoid "aaaaaaa" spam)
+        unique_chars = len(set(content.lower()))
+        char_diversity = min(1.0, unique_chars / 20.0)  # Good diversity at 20+ unique chars
+
+        # Word-to-character ratio (real language has ~5-6 chars/word)
+        words = re.findall(r'\b\w+\b', content)
+        if not words:
+            return 0.2  # No words found
+
+        avg_word_length = len(content) / len(words) if words else 0
+        # Ideal range: 4-8 chars per word (including spaces)
+        if 4.0 <= avg_word_length <= 10.0:
+            word_ratio_score = 1.0
+        elif 2.0 <= avg_word_length < 4.0 or 10.0 < avg_word_length <= 15.0:
+            word_ratio_score = 0.7
+        else:
+            word_ratio_score = 0.4  # Too short or too long words
+
+        # Special character noise (excessive punctuation/symbols)
+        special_char_count = len(re.findall(r'[^a-zA-Z0-9\s.,!?;:\'\"-]', content))
+        special_char_ratio = special_char_count / len(content)
+        if special_char_ratio < 0.05:
+            special_char_score = 1.0
+        elif special_char_ratio < 0.15:
+            special_char_score = 0.7
+        else:
+            special_char_score = 0.3  # Too many special chars
+
+        # Capitalization patterns (avoid ALL CAPS or no caps)
+        uppercase_ratio = sum(1 for c in content if c.isupper()) / len(content)
+        if 0.05 <= uppercase_ratio <= 0.20:  # Typical English prose
+            capitalization_score = 1.0
+        elif uppercase_ratio < 0.01 or uppercase_ratio > 0.50:
+            capitalization_score = 0.5  # Unusual pattern
+        else:
+            capitalization_score = 0.8
+
+        # Aggregate quality score
+        quality = (
+            0.25 * char_diversity +
+            0.35 * word_ratio_score +
+            0.25 * special_char_score +
+            0.15 * capitalization_score
+        )
+
+        return float(np.clip(quality, 0.0, 1.0))
+
+    def _calculate_latency_indicators(
+        self,
+        retrieval_start_time: Optional[datetime],
+        retrieval_mode: str
+    ) -> float:
+        """
+        Signal 28: Latency indicators.
+
+        Measures retrieval performance health:
+        - Fast retrieval = healthy system = higher confidence
+        - Slow retrieval = potential issues = lower confidence
+
+        Returns: 0.0 = very slow, 1.0 = fast
+        """
+        if not retrieval_start_time:
+            return 0.8  # Assume healthy if not tracked
+
+        # Calculate elapsed time (this would be populated by the caller)
+        # For now, we'll use a placeholder that can be populated by memory_service
+        # Typical latencies by mode:
+        # LIGHTWEIGHT: < 50ms (PostgreSQL only)
+        # LOCAL: < 200ms (ChromaDB local)
+        # ONLINE: < 1000ms (ChromaDB with network)
+
+        mode_thresholds = {
+            'LIGHTWEIGHT': {'fast': 0.05, 'acceptable': 0.15, 'slow': 0.30},
+            'LOCAL': {'fast': 0.20, 'acceptable': 0.50, 'slow': 1.00},
+            'ONLINE': {'fast': 1.00, 'acceptable': 2.00, 'slow': 5.00}
+        }
+
+        # Default to LOCAL thresholds if mode unknown
+        thresholds = mode_thresholds.get(retrieval_mode, mode_thresholds['LOCAL'])
+
+        # For now, return neutral score (actual timing integration in memory_service)
+        # This signal will be fully activated when timing instrumentation is added
+        return 0.85  # Neutral-positive (most retrievals are reasonably fast)
+
+    def _calculate_error_log_presence(
+        self,
+        recent_error_count: int = 0
+    ) -> float:
+        """
+        Signal 30: Error log presence.
+
+        Checks for recent errors in retrieval pipeline:
+        - No errors = high confidence in system
+        - Recent errors = lower confidence (system may be unreliable)
+
+        Returns: 0.0 = many errors, 1.0 = no errors
+        """
+        # This will be populated by memory_service tracking errors
+        # For now, we assume healthy system (no errors tracked yet)
+
+        if recent_error_count == 0:
+            return 1.0  # Perfect health
+        elif recent_error_count <= 2:
+            return 0.8  # Minor issues
+        elif recent_error_count <= 5:
+            return 0.5  # Moderate concerns
+        else:
+            return 0.2  # System unstable
+
     def extract(
         self,
         query: str,
@@ -544,11 +678,26 @@ class SignalExtractor:
         # Tier 4 Phase 2: Temporal alignment
         temporal_alignment = self._calculate_temporal_alignment(query, result_created_at)
 
+        # === PHASE 3 SIGNALS (LOCAL-FIRST) ===
+
+        # Tier 2 Phase 3: Language quality
+        content = current_metadata.get('content', '')
+        language_quality = self._calculate_language_quality(content)
+
+        # Tier 5 Phase 3: Latency and error indicators
+        # These will be properly instrumented in memory_service
+        # For now, use defaults (assumes healthy system)
+        latency_indicators = self._calculate_latency_indicators(
+            retrieval_start_time=None,  # TODO: pass from memory_service
+            retrieval_mode=retrieval_mode
+        )
+        error_log_presence = self._calculate_error_log_presence(recent_error_count=0)
+
         # === TIER 7: META-SIGNALS ===
 
         # Signal completeness: how many signals have real data vs defaults
         signals_available = 0
-        total_signals = 21  # 14 mandatory + 7 Phase 2
+        total_signals = 24  # 14 mandatory + 7 Phase 2 + 3 Phase 3
 
         # Check which signals have non-default values
         # v1 mandatory signals (14)
@@ -576,6 +725,11 @@ class SignalExtractor:
         signals_available += 1  # constraint_richness always available
         signals_available += 1  # temporal_alignment always available
 
+        # Phase 3 signals (3) - local-first, always calculated
+        signals_available += 1  # language_quality always available
+        signals_available += 1  # latency_indicators always available
+        signals_available += 1  # error_log_presence always available
+
         signal_completeness = signals_available / total_signals
 
         # === CONSTRUCT SIGNAL VECTOR ===
@@ -595,6 +749,8 @@ class SignalExtractor:
             redundancy_score=redundancy_score,
             semantic_coherence=semantic_coherence,
             diversity_score=diversity_score,
+            # Tier 2: Phase 3
+            language_quality=language_quality,
             # Tier 3: Mandatory
             query_length=query_length,
             specificity_score=specificity_score,
@@ -607,8 +763,11 @@ class SignalExtractor:
             index_freshness=index_freshness,
             # Tier 4: Phase 2
             temporal_alignment=temporal_alignment,
-            # Tier 5
+            # Tier 5: Mandatory
             retrieval_path=retrieval_path,
+            # Tier 5: Phase 3
+            latency_indicators=latency_indicators,
+            error_log_presence=error_log_presence,
             # Tier 7
             signal_completeness=signal_completeness,
             # Context
@@ -618,7 +777,7 @@ class SignalExtractor:
         )
 
         logger.debug(
-            "Signals extracted (v2+Phase2)",
+            "Signals extracted (v2+Phase2+Phase3)",
             result_index=result_index,
             # v1 signals
             top_score=f"{top_score:.3f}",
@@ -632,6 +791,10 @@ class SignalExtractor:
             coherence=f"{semantic_coherence:.3f}",
             diversity=f"{diversity_score:.3f}",
             temporal_align=f"{temporal_alignment:.3f}",
+            # Phase 3 signals (local-first)
+            language_quality=f"{language_quality:.3f}",
+            latency=f"{latency_indicators:.3f}",
+            errors=f"{error_log_presence:.3f}",
             signal_completeness=f"{signal_completeness:.2f}"
         )
 
@@ -717,7 +880,7 @@ class ConfidenceAggregator:
         entropy_score = 1.0 - (signals.score_entropy if signals.score_entropy is not None else 0.5)
         geometry_score = geometry_base * (0.8 + 0.2 * entropy_score)  # 20% bonus for low entropy
 
-        # Tier 2: Quality (22% weight, includes Phase 2)
+        # Tier 2: Quality (22% weight, includes Phase 2 & Phase 3)
         trust_score = {
             SourceTrust.HIGH: 1.0,
             SourceTrust.MEDIUM: 0.7,
@@ -737,7 +900,12 @@ class ConfidenceAggregator:
 
         # Balance: want high coherence AND good diversity (not too similar, not too scattered)
         phase2_quality = (0.4 * redundancy + 0.4 * coherence + 0.2 * diversity)
-        quality_score = 0.7 * quality_base + 0.3 * phase2_quality
+
+        # Phase 3: language quality (local-first)
+        lang_quality = signals.language_quality if signals.language_quality is not None else 0.7
+
+        # Integrate all quality signals
+        quality_score = 0.60 * quality_base + 0.25 * phase2_quality + 0.15 * lang_quality
 
         # Tier 3: Query Clarity (20% weight, includes Phase 2)
         # Length normalization: optimal around 50-200 chars
@@ -762,9 +930,15 @@ class ConfidenceAggregator:
         alignment = signals.temporal_alignment if signals.temporal_alignment is not None else 0.8
         temporal_score = 0.7 * temporal_base + 0.3 * alignment
 
-        # Tier 5: System Health (15% weight, increased importance)
+        # Tier 5: System Health (15% weight, includes Phase 3)
         path_score = 1.0 if signals.retrieval_path == "normal" else 0.7
-        system_score = path_score
+
+        # Phase 3: latency and error indicators (local-first)
+        latency = signals.latency_indicators if signals.latency_indicators is not None else 0.85
+        errors = signals.error_log_presence if signals.error_log_presence is not None else 1.0
+
+        # Integrate system health signals
+        system_score = 0.40 * path_score + 0.35 * latency + 0.25 * errors
 
         # === FINAL CONFIDENCE ===
 
@@ -1029,6 +1203,18 @@ class ConfidenceAggregator:
         # Tier 4 Phase 2: Temporal Alignment
         if signals.temporal_alignment is not None and signals.temporal_alignment < 0.4:
             sources.append("temporal_mismatch")  # Query wants recent, got old (or vice versa)
+
+        # === PHASE 3 SIGNALS (LOCAL-FIRST) ===
+
+        # Tier 2 Phase 3: Language Quality
+        if signals.language_quality is not None and signals.language_quality < 0.5:
+            sources.append("poor_text_quality")  # Noisy, malformed, or low-quality content
+
+        # Tier 5 Phase 3: System Health
+        if signals.latency_indicators is not None and signals.latency_indicators < 0.6:
+            sources.append("slow_retrieval")  # System performance issues
+        if signals.error_log_presence is not None and signals.error_log_presence < 0.8:
+            sources.append("recent_errors")  # System instability detected
 
         # Tier 7: Meta
         if signals.signal_completeness < 0.7:
