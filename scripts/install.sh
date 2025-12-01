@@ -256,6 +256,18 @@ configure_features() {
         prompt_yes_no "Enable Consciousness Architecture?" "y" && ENABLE_CONSCIOUSNESS="true" || ENABLE_CONSCIOUSNESS="false"
         prompt_yes_no "Enable Self-Modifying? (ADVANCED, risky)" "n" && ENABLE_SELF_MODIFYING="true" || ENABLE_SELF_MODIFYING="false"
         prompt_yes_no "Enable Advanced NLP?" "y" && { USE_ADVANCED_NLP="true"; NLP_QUERY_EXPANSION="true"; } || { USE_ADVANCED_NLP="false"; NLP_QUERY_EXPANSION="false"; }
+        echo ""
+        echo "  ${BOLD}Memory Operation Mode:${NC}"
+        echo "  1) local (Full enrichment, all features)"
+        echo "  2) online (Balanced speed/features)"
+        echo "  3) lightweight (Minimal processing)"
+        read -p "Select [1]: " mem_mode_choice
+
+        case "${mem_mode_choice:-1}" in
+            2) MEMORY_OPERATION_MODE="online" ;;
+            3) MEMORY_OPERATION_MODE="lightweight" ;;
+            *) MEMORY_OPERATION_MODE="local" ;;
+        esac
     else
         ENABLE_FEDERATED="${MEMSHADOW_FEDERATED:-true}"
         ENABLE_META="${MEMSHADOW_META:-true}"
@@ -263,7 +275,10 @@ configure_features() {
         ENABLE_SELF_MODIFYING="${MEMSHADOW_SELF_MODIFYING:-false}"
         USE_ADVANCED_NLP="${MEMSHADOW_ADVANCED_NLP:-true}"
         NLP_QUERY_EXPANSION="${MEMSHADOW_NLP_EXPANSION:-true}"
+        MEMORY_OPERATION_MODE="${MEMSHADOW_MEMORY_OPERATION_MODE:-local}"
     fi
+
+    log_info "Memory Operation Mode: $MEMORY_OPERATION_MODE"
 }
 
 # ============================================================================
@@ -344,6 +359,7 @@ ENABLE_FEDERATED_LEARNING=$ENABLE_FEDERATED
 ENABLE_META_LEARNING=$ENABLE_META
 ENABLE_CONSCIOUSNESS=$ENABLE_CONSCIOUSNESS
 ENABLE_SELF_MODIFYING=$ENABLE_SELF_MODIFYING
+MEMORY_OPERATION_MODE=$MEMORY_OPERATION_MODE
 
 # Logging
 LOG_LEVEL=INFO
@@ -391,6 +407,26 @@ build_and_run() {
             curl -sf http://localhost:8000/health &>/dev/null && { echo ""; log_success "MEMSHADOW is running!"; break; }
             echo -n "."; sleep 2
         done
+    fi
+}
+
+run_alembic_migration() {
+    [[ "$SKIP_MIGRATION" == "true" ]] && return
+
+    log_step "Running Alembic Database Migrations"
+    cd "$SCRIPT_DIR"
+    # Ensure Docker containers are running before attempting Alembic migration
+    docker compose up -d postgres redis chromadb || docker-compose up -d postgres redis chromadb
+
+    log_info "Executing: alembic upgrade head"
+    docker compose run --rm memshadow alembic upgrade head 2>/dev/null || \
+    docker-compose run --rm memshadow alembic upgrade head
+
+    if [ $? -eq 0 ]; then
+        log_success "Alembic migrations completed successfully"
+    else
+        log_error "Alembic migrations failed. Check database connection and logs."
+        exit 1
     fi
 }
 
@@ -496,6 +532,7 @@ main() {
     generate_env
     update_docker_compose
     build_and_run
+    run_alembic_migration
     run_migration
     print_summary
 }
