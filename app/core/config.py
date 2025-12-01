@@ -181,6 +181,11 @@ class Settings(BaseSettings):
     NEURAL_STORAGE_PERSISTENCE_PATH: str = "/var/lib/memshadow/neural_storage"
     NEURAL_STORAGE_ENABLE_PERSISTENCE: bool = True
 
+    # Phase 8.3: Metacognitive Confidence Estimation
+    ENABLE_METACOGNITIVE_CONFIDENCE: bool = True
+    METACOGNITIVE_CONFIDENCE_THRESHOLD: float = 0.6  # Recommend review if confidence < this
+    METACOGNITIVE_LOW_SIMILARITY_THRESHOLD: float = 0.5  # Flag as low confidence if similarity < this
+
     class Config:
         case_sensitive = True
         env_file = ".env"
