@@ -1,9 +1,8 @@
--r base.txt
+# MEMSHADOW Development Requirements
+# Includes all dependencies plus development tools
 
-# Testing
-pytest
-pytest-asyncio
-httpx
-pytest-cov
-pytest-celery
-pytest-env
+# Include all production requirements
+-r requirements.txt
+
+# Include development-specific requirements
+-r requirements/dev.txt

@@ -1,8 +1,0 @@
-# MEMSHADOW Main Requirements
-# This file includes all dependencies for the complete MEMSHADOW system
-
-# Include base requirements
--r requirements/base.txt
-
-# Include web interface requirements
--r requirements-web.txt

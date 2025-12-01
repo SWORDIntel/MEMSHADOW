@@ -1,38 +1,8 @@
-# Core
-python-dotenv
-fastapi
-pydantic[email]
-pydantic-settings
-uvicorn[standard]
-sqlalchemy[asyncio]
-asyncpg
-alembic
-python-jose[cryptography]
-passlib[bcrypt]>=1.7.4
-bcrypt==3.2.2
-structlog
-python-multipart
-gunicorn
-greenlet
+# MEMSHADOW Main Requirements
+# This file includes all dependencies for the complete MEMSHADOW system
 
-# Database
-redis
-chromadb-client
-pgvector
-psycopg2-binary
+# Include base requirements
+-r requirements/base.txt
 
-# AI/ML
-sentence-transformers
-torch
-numpy
-scikit-learn
-
-# Security
-fido2
-cryptography
-
-# Celery
-celery[redis]
-
-# Monitoring
-prometheus-fastapi-instrumentator
+# Include web interface requirements
+-r requirements-web.txt
