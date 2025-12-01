@@ -186,6 +186,16 @@ class Settings(BaseSettings):
     METACOGNITIVE_CONFIDENCE_THRESHOLD: float = 0.6  # Recommend review if confidence < this
     METACOGNITIVE_LOW_SIMILARITY_THRESHOLD: float = 0.5  # Flag as low confidence if similarity < this
 
+    # =============================================================
+    # KP14 Integration Configuration (Optional)
+    # =============================================================
+    # MEMSHADOW can operate as a standalone system or as a spoke
+    # node receiving data from KP14 via mesh network.
+    ENABLE_KP14_INTEGRATION: bool = False  # Disabled by default - MEMSHADOW works standalone
+    KP14_MESH_PORT: int = 8890  # Port for receiving KP14 mesh messages
+    KP14_AUTO_STORE: bool = True  # Auto-store received KP14 analyses
+    SYSTEM_USER_ID: str = "00000000-0000-0000-0000-000000000000"  # System user for automated imports
+
     class Config:
         case_sensitive = True
         env_file = ".env"
