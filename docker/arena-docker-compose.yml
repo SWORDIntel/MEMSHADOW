@@ -1,0 +1,194 @@
+version: '3.8'
+
+# SWARM Arena - Isolated environment for autonomous security testing
+# This docker-compose file sets up:
+# - MEMSHADOW staging stack (target)
+# - SWARM Coordinator
+# - SWARM Agents (recon, apimapper, authtest, bgp, blockchain)
+# - Dedicated Redis for blackboard
+# - Log aggregation
+
+networks:
+  hydra_arena_net:
+    driver: bridge
+    internal: true  # No external access
+  arena_logging:
+    driver: bridge
+
+services:
+  # ===== TARGET: MEMSHADOW Staging Stack =====
+
+  arena_postgres:
+    image: pgvector/pgvector:pg16
+    networks:
+      - hydra_arena_net
+    environment:
+      POSTGRES_USER: memshadow
+      POSTGRES_PASSWORD: ${ARENA_POSTGRES_PASSWORD:-staging_password}
+      POSTGRES_DB: memshadow_staging
+    volumes:
+      - arena_postgres_data:/var/lib/postgresql/data
+
+  arena_redis_memshadow:
+    image: redis:7-alpine
+    networks:
+      - hydra_arena_net
+    command: redis-server --appendonly yes
+
+  arena_chromadb:
+    image: chromadb/chroma:latest
+    networks:
+      - hydra_arena_net
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    volumes:
+      - arena_chroma_data:/chroma/chroma
+
+  arena_memshadow_api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      DATABASE_URL: postgresql+asyncpg://memshadow:${ARENA_POSTGRES_PASSWORD:-staging_password}@arena_postgres:5432/memshadow_staging
+      REDIS_URL: redis://arena_redis_memshadow:6379/0
+      CHROMA_HOST: arena_chromadb
+      CHROMA_PORT: 8000
+    depends_on:
+      - arena_postgres
+      - arena_redis_memshadow
+      - arena_chromadb
+
+  # ===== SWARM Infrastructure =====
+
+  swarm_redis:
+    image: redis:7-alpine
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    command: redis-server --appendonly yes
+    volumes:
+      - swarm_redis_data:/data
+
+  swarm_coordinator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.swarm_coordinator
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      REDIS_URL: redis://swarm_redis:6379/0
+      MISSION_FILE: /missions/default_recon.yaml
+    depends_on:
+      - swarm_redis
+      - arena_memshadow_api
+    volumes:
+      - ../missions:/missions:ro
+      - swarm_reports:/reports
+
+  # ===== SWARM Agents =====
+
+  agent_recon:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.swarm_agent
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      REDIS_URL: redis://swarm_redis:6379/0
+      AGENT_TYPE: recon
+    command: python agent_recon.py
+    depends_on:
+      - swarm_redis
+    deploy:
+      replicas: 2
+
+  agent_apimapper:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.swarm_agent
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      REDIS_URL: redis://swarm_redis:6379/0
+      AGENT_TYPE: apimapper
+    command: python agent_apimapper.py
+    depends_on:
+      - swarm_redis
+    deploy:
+      replicas: 2
+
+  agent_authtest:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.swarm_agent
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      REDIS_URL: redis://swarm_redis:6379/0
+      AGENT_TYPE: authtest
+    command: python agent_authtest.py
+    depends_on:
+      - swarm_redis
+    deploy:
+      replicas: 2
+
+  agent_bgp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.swarm_agent
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      REDIS_URL: redis://swarm_redis:6379/0
+      AGENT_TYPE: bgp
+    command: python agent_bgp.py
+    depends_on:
+      - swarm_redis
+    deploy:
+      replicas: 1
+
+  agent_blockchain:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.swarm_agent
+    networks:
+      - hydra_arena_net
+      - arena_logging
+    environment:
+      REDIS_URL: redis://swarm_redis:6379/0
+      AGENT_TYPE: blockchain
+    command: python agent_blockchain.py
+    depends_on:
+      - swarm_redis
+    deploy:
+      replicas: 1
+
+  # ===== Log Aggregation =====
+
+  fluentd:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.fluentd
+    networks:
+      - arena_logging
+    volumes:
+      - ./fluent.conf:/fluentd/etc/fluent.conf:ro
+      - arena_logs:/var/log/arena
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+
+volumes:
+  arena_postgres_data:
+  arena_chroma_data:
+  swarm_redis_data:
+  swarm_reports:
+  arena_logs:

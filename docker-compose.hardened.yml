@@ -1,0 +1,580 @@
+version: '3.8'
+
+# MEMSHADOW Hardened Production Deployment
+# APT-Grade Security Configuration
+# Classification: UNCLASSIFIED
+
+services:
+  # PostgreSQL with Security Hardening
+  postgres:
+    image: postgres:15-alpine
+    container_name: memshadow-postgres-hardened
+    hostname: postgres
+
+    # Security: Read-only root filesystem
+    read_only: true
+
+    # Security: Temporary filesystem for writable data
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+      - /var/run/postgresql:noexec,nosuid,size=10m
+
+    environment:
+      POSTGRES_DB: memshadow
+      POSTGRES_USER: memshadow
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8 --auth=scram-sha-256"
+      # Security: Disable PostgreSQL history
+      PSQL_HISTORY: /dev/null
+
+    secrets:
+      - postgres_password
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:rw
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./security/policies/postgres.conf:/etc/postgresql/postgresql.conf:ro
+
+    ports:
+      - "127.0.0.1:5432:5432"  # Bind to localhost only
+
+    networks:
+      memshadow-internal:
+        ipv4_address: 172.29.0.10
+
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=docker-default
+      - seccomp=./security/seccomp/postgres-seccomp.json
+
+    # Security: User namespace
+    user: "70:70"
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+          pids: 100
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memshadow -d memshadow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    restart: on-failure:3
+    stop_grace_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=postgres,security=hardened"
+
+  # Redis with Security Hardening
+  redis:
+    image: redis:7-alpine
+    container_name: memshadow-redis-hardened
+    hostname: redis
+
+    # Security: Read-only root filesystem
+    read_only: true
+
+    # Security: Temporary filesystem
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+
+    command: >
+      redis-server
+      --requirepass $$(cat /run/secrets/redis_password)
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode yes
+      --bind 0.0.0.0
+      --port 6379
+      --tcp-backlog 511
+      --timeout 300
+      --tcp-keepalive 60
+      --loglevel warning
+      --rename-command FLUSHDB ""
+      --rename-command FLUSHALL ""
+      --rename-command KEYS ""
+      --rename-command CONFIG ""
+      --rename-command SHUTDOWN SHUTDOWN_MEMSHADOW
+
+    secrets:
+      - redis_password
+
+    volumes:
+      - redis_data:/data:rw
+
+    ports:
+      - "127.0.0.1:6379:6379"  # Localhost only
+
+    networks:
+      memshadow-internal:
+        ipv4_address: 172.29.0.11
+
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=docker-default
+      - seccomp=./security/seccomp/redis-seccomp.json
+
+    user: "999:999"
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+          pids: 50
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "$$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    restart: on-failure:3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ChromaDB with Security Hardening
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: memshadow-chromadb-hardened
+    hostname: chromadb
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
+    environment:
+      CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
+      CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER: "X-Chroma-Token"
+      CHROMA_SERVER_AUTH_CREDENTIALS_FILE: /run/secrets/chroma_token
+      ALLOW_RESET: "false"
+      IS_PERSISTENT: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      CHROMA_SERVER_HOST: "0.0.0.0"
+      CHROMA_SERVER_HTTP_PORT: "8000"
+
+    secrets:
+      - chroma_token
+
+    volumes:
+      - chromadb_data:/chroma/chroma:rw
+
+    ports:
+      - "127.0.0.1:8001:8000"
+
+    networks:
+      memshadow-internal:
+        ipv4_address: 172.29.0.12
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=docker-default
+
+    user: "1000:1000"
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+          pids: 100
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    restart: on-failure:3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MEMSHADOW Application (Hardened)
+  memshadow:
+    build:
+      context: .
+      dockerfile: Dockerfile.hardened
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+
+    image: memshadow:2.1-hardened
+    container_name: memshadow-app-hardened
+    hostname: memshadow
+
+    # Security: Read-only root filesystem
+    read_only: true
+
+    # Writable tmpfs mounts
+    tmpfs:
+      - /tmp:noexec,nosuid,size=500m
+      - /app/logs:noexec,nosuid,size=200m
+      - /app/missions:exec,nosuid,size=100m
+
+    environment:
+      # Database
+      DATABASE_URL_FILE: /run/secrets/database_url
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+
+      # ChromaDB
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      CHROMA_TOKEN_FILE: /run/secrets/chroma_token
+
+      # Application
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+
+      # Security
+      MEMSHADOW_SECURITY_HARDENED: "true"
+      MEMSHADOW_APT_DEFENSE: "enabled"
+      MEMSHADOW_INTRUSION_DETECTION: "enabled"
+      MEMSHADOW_WAF_ENABLED: "true"
+      MEMSHADOW_RATE_LIMIT_STRICT: "true"
+
+      # AI/ML Hardware (130 TOPS)
+      MEMSHADOW_AI_ENABLED: "true"
+      MEMSHADOW_AI_DEVICE: "cuda"  # GPU acceleration
+      MEMSHADOW_NPU_ENABLED: "true"  # Intel NPU
+      MEMSHADOW_TENSOR_CORES: "true"
+      MEMSHADOW_AI_BATCH_SIZE: "32"
+
+      # Threat Intelligence
+      MEMSHADOW_THREAT_INTEL_ENABLED: "true"
+      MEMSHADOW_MISP_ENABLED: "true"
+      MEMSHADOW_OPENCTI_ENABLED: "true"
+
+    secrets:
+      - database_url
+      - redis_password
+      - chroma_token
+      - secret_key
+      - jwt_secret_key
+
+    volumes:
+      - memshadow_data:/data:rw
+      - ./app/exfil:/app/exfil:rw,noexec
+      - ./app/payloads:/app/payloads:rw,noexec
+      - type: bind
+        source: ./security/policies
+        target: /app/security/policies
+        read_only: true
+
+    ports:
+      - "127.0.0.1:8000:8000"  # Main API (localhost only, use reverse proxy)
+      - "127.0.0.1:8443:8443"  # C2 HTTPS
+      - "127.0.0.1:8080:8080"  # TEMPEST Dashboard
+
+    networks:
+      memshadow-internal:
+        ipv4_address: 172.29.0.20
+      memshadow-dmz:  # DMZ for external access
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      waf:
+        condition: service_started
+      ids:
+        condition: service_started
+
+    # Security: Minimal capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=memshadow
+      - seccomp=./security/seccomp/memshadow-seccomp.json
+
+    # Run as non-root user
+    user: "1000:1000"
+
+    # PID limit (prevent fork bombs)
+    pids_limit: 200
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '8'  # Utilize AI/ML hardware
+          memory: 16G
+          pids: 200
+        reservations:
+          cpus: '4'
+          memory: 8G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, compute, utility]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+    restart: on-failure:3
+    stop_grace_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=memshadow,security=hardened"
+
+  # WAF (Web Application Firewall)
+  waf:
+    image: owasp/modsecurity-crs:nginx-alpine
+    container_name: memshadow-waf
+    hostname: waf
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+      - /var/run:noexec,nosuid,size=10m
+      - /var/cache/nginx:noexec,nosuid,size=50m
+
+    volumes:
+      - ./security/waf/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./security/waf/modsecurity.conf:/etc/modsecurity.d/modsecurity.conf:ro
+      - ./security/waf/crs-setup.conf:/etc/modsecurity.d/crs-setup.conf:ro
+      - ./security/waf/rules:/etc/modsecurity.d/rules:ro
+      - waf_logs:/var/log/nginx:rw
+
+    ports:
+      - "443:443"  # HTTPS (external)
+      - "80:80"    # HTTP (redirect to HTTPS)
+
+    networks:
+      memshadow-dmz:
+        ipv4_address: 172.30.0.10
+      memshadow-internal:
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
+
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+          pids: 50
+
+    restart: on-failure:3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Intrusion Detection System (Suricata)
+  ids:
+    image: jasonish/suricata:latest
+    container_name: memshadow-ids
+    hostname: ids
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+      - /var/run/suricata:noexec,nosuid,size=50m
+
+    volumes:
+      - ./security/ids/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./security/ids/rules:/etc/suricata/rules:ro
+      - ids_logs:/var/log/suricata:rw
+
+    networks:
+      memshadow-internal:
+        ipv4_address: 172.29.0.30
+      memshadow-dmz:
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+
+    security_opt:
+      - no-new-privileges:true
+
+    network_mode: host  # Required for packet capture
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+    restart: on-failure:3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+# ============================================================================
+# Docker Secrets (Production: use external secrets management)
+# ============================================================================
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
+  chroma_token:
+    file: ./secrets/chroma_token.txt
+  database_url:
+    file: ./secrets/database_url.txt
+  secret_key:
+    file: ./secrets/secret_key.txt
+  jwt_secret_key:
+    file: ./secrets/jwt_secret_key.txt
+
+# ============================================================================
+# Networks (Segmented for Defense-in-Depth)
+# ============================================================================
+
+networks:
+  # Internal network (no external access)
+  memshadow-internal:
+    driver: bridge
+    internal: true  # No internet access
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1
+    driver_opts:
+      com.docker.network.bridge.name: "memshadow-int"
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+  # DMZ network (controlled external access)
+  memshadow-dmz:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+    driver_opts:
+      com.docker.network.bridge.name: "memshadow-dmz"
+
+# ============================================================================
+# Volumes (Encrypted at rest recommended)
+# ============================================================================
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/memshadow/postgres
+
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/memshadow/redis
+
+  chromadb_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/memshadow/chromadb
+
+  memshadow_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/memshadow/data
+
+  waf_logs:
+    driver: local
+
+  ids_logs:
+    driver: local

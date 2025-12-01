@@ -1,0 +1,241 @@
+version: '3.8'
+
+# HYDRA SWARM Arena
+# Isolated testing environment for autonomous security testing
+#
+# The Arena provides:
+# - Isolated network for safe testing
+# - Vulnerable test applications
+# - Redis for agent communication
+# - Monitoring and logging
+# - Resource limits to prevent impact on host
+
+services:
+  # Redis Blackboard for agent communication
+  arena-redis:
+    image: redis:7-alpine
+    container_name: arena-redis
+    networks:
+      - arena-network
+    ports:
+      - "6380:6379"  # Non-standard port to avoid conflicts
+    command: redis-server --appendonly yes
+    volumes:
+      - arena-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # SWARM Coordinator
+  arena-coordinator:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile
+    container_name: arena-coordinator
+    depends_on:
+      - arena-redis
+    networks:
+      - arena-network
+    environment:
+      - REDIS_URL=redis://arena-redis:6379
+      - SWARM_MODE=arena
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    command: python -m app.services.hydra.swarm.coordinator
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Test Target: Vulnerable API (DVWA-like)
+  arena-target-api:
+    image: citizenstig/dvwa:latest
+    container_name: arena-target-api
+    networks:
+      - arena-network
+    ports:
+      - "8081:80"
+    environment:
+      - MYSQL_ROOT_PASSWORD=vulnerablerootpass
+      - MYSQL_DATABASE=dvwa
+      - MYSQL_USER=dvwa
+      - MYSQL_PASSWORD=password
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Test Target: Mock REST API
+  arena-target-rest:
+    image: mockoon/cli:latest
+    container_name: arena-target-rest
+    networks:
+      - arena-network
+    ports:
+      - "8082:3000"
+    volumes:
+      - ./mock-api.json:/data/mock-api.json:ro
+    command: ["--data", "/data/mock-api.json", "--port", "3000"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # Recon Agent
+  arena-agent-recon:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile
+    container_name: arena-agent-recon
+    depends_on:
+      - arena-redis
+      - arena-coordinator
+    networks:
+      - arena-network
+    environment:
+      - REDIS_URL=redis://arena-redis:6379
+      - AGENT_TYPE=ReconAgent
+      - COORDINATOR_URL=http://arena-coordinator:8000
+      - LOG_LEVEL=DEBUG
+    command: python -m app.services.hydra.swarm.agent_recon
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # API Mapper Agent
+  arena-agent-apimapper:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile
+    container_name: arena-agent-apimapper
+    depends_on:
+      - arena-redis
+      - arena-coordinator
+    networks:
+      - arena-network
+    environment:
+      - REDIS_URL=redis://arena-redis:6379
+      - AGENT_TYPE=APIMapperAgent
+      - COORDINATOR_URL=http://arena-coordinator:8000
+      - LOG_LEVEL=DEBUG
+    command: python -m app.services.hydra.swarm.agent_apimapper
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Auth Test Agent
+  arena-agent-authtest:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile
+    container_name: arena-agent-authtest
+    depends_on:
+      - arena-redis
+      - arena-coordinator
+    networks:
+      - arena-network
+    environment:
+      - REDIS_URL=redis://arena-redis:6379
+      - AGENT_TYPE=AuthTestAgent
+      - COORDINATOR_URL=http://arena-coordinator:8000
+      - LOG_LEVEL=DEBUG
+    command: python -m app.services.hydra.swarm.agent_authtest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Mission Orchestrator
+  arena-orchestrator:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile
+    container_name: arena-orchestrator
+    depends_on:
+      - arena-redis
+      - arena-coordinator
+    networks:
+      - arena-network
+    ports:
+      - "8083:8000"
+    environment:
+      - REDIS_URL=redis://arena-redis:6379
+      - COORDINATOR_URL=http://arena-coordinator:8000
+      - LOG_LEVEL=DEBUG
+    command: python -m app.services.hydra.swarm.mission
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Monitoring: Prometheus
+  arena-prometheus:
+    image: prom/prometheus:latest
+    container_name: arena-prometheus
+    networks:
+      - arena-network
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.arena.yml:/etc/prometheus/prometheus.yml:ro
+      - arena-prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+
+  # Monitoring: Grafana
+  arena-grafana:
+    image: grafana/grafana:latest
+    container_name: arena-grafana
+    depends_on:
+      - arena-prometheus
+    networks:
+      - arena-network
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=arena_admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - arena-grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+networks:
+  arena-network:
+    name: hydra-arena
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: br-arena
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+
+volumes:
+  arena-redis-data:
+    name: arena-redis-data
+  arena-prometheus-data:
+    name: arena-prometheus-data
+  arena-grafana-data:
+    name: arena-grafana-data

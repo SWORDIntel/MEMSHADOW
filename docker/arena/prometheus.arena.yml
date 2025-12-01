@@ -1,0 +1,68 @@
+# Prometheus Configuration for HYDRA SWARM Arena
+# Monitors coordinator, agents, and mission orchestrator
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'arena'
+    cluster: 'hydra-swarm'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Scrape configurations
+scrape_configs:
+  # Coordinator metrics
+  - job_name: 'swarm-coordinator'
+    static_configs:
+      - targets: ['arena-coordinator:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Mission orchestrator metrics
+  - job_name: 'mission-orchestrator'
+    static_configs:
+      - targets: ['arena-orchestrator:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Recon agent metrics
+  - job_name: 'agent-recon'
+    static_configs:
+      - targets: ['arena-agent-recon:9100']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # API mapper agent metrics
+  - job_name: 'agent-apimapper'
+    static_configs:
+      - targets: ['arena-agent-apimapper:9100']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Auth test agent metrics
+  - job_name: 'agent-authtest'
+    static_configs:
+      - targets: ['arena-agent-authtest:9100']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Redis metrics (if redis_exporter added)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['arena-redis:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+# Recording rules for SWARM metrics
+rule_files:
+  - '/etc/prometheus/swarm_rules.yml'

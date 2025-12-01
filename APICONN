@@ -1,0 +1,64 @@
+Done! MCP server created at mcp_server.py:
+
+Add to Claude Desktop config (~/.config/claude-desktop/config.json):
+
+{
+  "mcpServers": {
+    "memshadow": {
+      "command": "python",
+      "args": ["/path/to/MEMSHADOW/mcp_server.py"],
+      "env": {
+        "MEMSHADOW_API_URL": "http://localhost:8000",
+        "MEMSHADOW_API_KEY": "your-token"
+      }
+    }
+  }
+}
+Available MCP Tools:
+
+Tool	Description
+store_memory	Save memories with tags & importance
+search_memories	Semantic search through memories
+list_recent_memories	Get recent memories
+delete_memory	Remove a memory by ID
+sync_memories	Force sync with server
+Resources:
+
+memshadow://memories/recent - Recent 20 memories
+memshadow://memories/stats - Memory statistics
+Any AI using the MCP server shares the same memory pool - memories stored by one client are instantly available to all others via the MEMSHADOW API.
+
+Wrap Any LLM with Memory:
+
+from sdk.memshadow_client import MemoryAugmentedLLM
+
+# Your custom LLM function
+def my_llm(prompt: str) -> str:
+    # ollama, llama.cpp, transformers, etc.
+    return call_your_model(prompt)
+
+# Wrap with memory
+ai = MemoryAugmentedLLM(my_llm, "http://localhost:8000", "api-key")
+
+# Now it automatically:
+# 1. Recalls relevant memories
+# 2. Injects them into the prompt
+# 3. Stores the conversation
+response = ai.chat("What did we discuss before?")
+Works with:
+
+Ollama
+llama.cpp
+HuggingFace Transformers
+vLLM
+Any custom inference server
+An error occurred while executing Claude Code. You can try again by sending a new message or starting a new session.
+
+An error occurred while executing Claude Code. You can try again by sending a new message or starting a new session.
+
+An error occurred while executing Claude Code. You can try again by sending a new message or starting a new session.
+
+An error occurred while executing Claude Code. You can try again by sending a new message or starting a new session.
+
+Fuly update readme with all our new info
+

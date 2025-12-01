@@ -1,0 +1,8 @@
+# MEMSHADOW Development Requirements
+# Includes all dependencies plus development tools
+
+# Include all production requirements
+-r requirements.txt
+
+# Include development-specific requirements
+-r requirements/dev.txt
