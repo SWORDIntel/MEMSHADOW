@@ -196,6 +196,22 @@ class Settings(BaseSettings):
     KP14_AUTO_STORE: bool = True  # Auto-store received KP14 analyses
     SYSTEM_USER_ID: str = "00000000-0000-0000-0000-000000000000"  # System user for automated imports
 
+    # =============================================================
+    # Phase-0 SIGINT/GEOINT Configuration
+    # =============================================================
+    # Enable SIGINT/GEOINT subsystem for network intelligence from server logs
+    ENABLE_SIGINT_GEOINT: bool = True
+
+    # GeoIP Database Paths (download from https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)
+    GEOIP_CITY_DB_PATH: str = "/var/lib/memshadow/geoip/GeoLite2-City.mmdb"
+    GEOIP_ASN_DB_PATH: str = "/var/lib/memshadow/geoip/GeoLite2-ASN.mmdb"
+
+    # Auto-load AOIs on startup
+    SIGINT_AUTO_LOAD_AOIS: bool = True
+
+    # Default observation retention period (days)
+    SIGINT_OBSERVATION_RETENTION_DAYS: int = 90
+
     class Config:
         case_sensitive = True
         env_file = ".env"

@@ -1,0 +1,10 @@
+# MEMSHADOW Phase-0 SIGINT/GEOINT Additional Dependencies
+
+# GeoIP enrichment
+geoip2>=4.7.0
+
+# Geographic operations (point-in-polygon, geometry)
+shapely>=2.0.0
+
+# HTTP client for sigint-net-agent
+aiohttp>=3.9.0

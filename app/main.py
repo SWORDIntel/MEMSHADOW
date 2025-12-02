@@ -44,6 +44,20 @@ if ENABLE_KP14_INTEGRATION:
 else:
     logger.info("KP14 integration disabled (ENABLE_KP14_INTEGRATION=false)")
 
+# Conditionally import SIGINT/GEOINT router
+sigint_router = None
+ENABLE_SIGINT = settings.ENABLE_SIGINT_GEOINT
+if ENABLE_SIGINT:
+    try:
+        from app.api.v1 import sigint
+        sigint_router = sigint.router
+        logger.info("SIGINT/GEOINT subsystem enabled")
+    except ImportError as e:
+        logger.warning(f"SIGINT/GEOINT subsystem not available: {e}")
+        ENABLE_SIGINT = False
+else:
+    logger.info("SIGINT/GEOINT subsystem disabled")
+
 # Conditionally import mesh client (only when KP14 integration enabled)
 # Mesh client allows MEMSHADOW to act as a spoke node receiving hub broadcasts
 mesh_client = None
@@ -141,6 +155,10 @@ app.include_router(task_reminders.router, prefix=f"{settings.API_V1_STR}/reminde
 if kp14_router:
     app.include_router(kp14_router, prefix=f"{settings.API_V1_STR}", tags=["kp14"])
 
+# Include optional SIGINT/GEOINT router
+if sigint_router:
+    app.include_router(sigint_router, prefix=f"{settings.API_V1_STR}/sigint", tags=["sigint"])
+
 
 @app.get("/")
 def read_root():
@@ -159,6 +177,11 @@ def list_integrations():
             "enabled": MESH_CLIENT_AVAILABLE,
             "available": mesh_client is not None,
             "status": mesh_client.get_status() if mesh_client else None,
+        },
+        "sigint_geoint": {
+            "enabled": ENABLE_SIGINT,
+            "available": sigint_router is not None,
+            "description": "Phase-0 SIGINT/GEOINT from server logs + OSINT"
         },
     }
     return integrations
