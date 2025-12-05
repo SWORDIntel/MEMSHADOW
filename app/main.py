@@ -8,6 +8,14 @@ import os
 
 from app.api.v1 import auth, memory, health, openai_compat, task_reminders
 
+# DSMILSYSTEM integration (optional, feature-flagged)
+try:
+    from app.api.v1 import memory_dsmil
+    DSMILSYSTEM_ENABLED = True
+except ImportError:
+    DSMILSYSTEM_ENABLED = False
+    memory_dsmil = None
+
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db import postgres, chromadb, redis
@@ -136,6 +144,10 @@ app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["aut
 app.include_router(memory.router, prefix=f"{settings.API_V1_STR}/memory", tags=["memory"])
 app.include_router(openai_compat.router, prefix="/v1", tags=["openai"])
 app.include_router(task_reminders.router, prefix=f"{settings.API_V1_STR}/reminders", tags=["reminders"])
+
+# Include DSMILSYSTEM memory API (if enabled)
+if DSMILSYSTEM_ENABLED and memory_dsmil:
+    app.include_router(memory_dsmil.router, tags=["dsmilsystem"])
 
 # Include optional KP14 integration router
 if kp14_router:
