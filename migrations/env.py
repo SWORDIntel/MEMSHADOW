@@ -29,6 +29,11 @@ from app.models.memory import Memory
 from app.models.auth import WebAuthnCredential
 from app.models.audit import AuditEvent
 from app.models.chimera import Lure, TriggerEvent
+# Import DSMILSYSTEM model
+try:
+    from app.models.memory_dsmil import Memory as MemoryDSMIL
+except ImportError:
+    pass  # Model may not exist in older versions
 
 target_metadata = Base.metadata
 

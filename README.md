@@ -606,19 +606,36 @@ docker-compose down
 ## Documentation
 
 ### Getting Started
-* [Quick Start Guide](docs/DEPLOYMENT_GUIDE.md) - Complete deployment instructions
+* [Getting Started Guide](docs/getting-started/GETTING_STARTED.md) - Quick start for new users (5 minutes)
+* [Deployment Guide](docs/guides/DEPLOYMENT.md) - Complete deployment instructions
+* [Production Deployment](docs/guides/PRODUCTION_DEPLOYMENT.md) - Production setup guide
 * [Production Security](docs/PRODUCTION_SECURITY.md) - Security best practices and hardening
 * [API Documentation](http://localhost:8000/api/docs) - Interactive OpenAPI docs (when running)
 
 ### Architecture & Design
+* [Architecture Overview](docs/ARCHITECTURE.md) - Complete system architecture
 * [Core Concepts](docs/specs/MEMSHADOW.md) - Fundamental architecture and design principles
 * [Unified Architecture](docs/specs/MEMSHADOW_UNIFIED_ARCHITECTURE.md) - Complete system design
 * [Security Improvements v1.0](docs/SECURITY_IMPROVEMENTS_V1.0.md) - Security enhancements
 
+### Components & Features
+* [SWARM Project](docs/SWARM_README.md) - Autonomous agent swarm documentation
+* [SWARM Components](docs/components/swarm.md) - SWARM technical specifications
+* [Intelligence Analysis Guide](docs/INTELLIGENCE_ANALYSIS_GUIDE.md) - 2048-dimensional vector intelligence system
+* [Component Documentation](docs/components/) - Individual component guides
+
 ### Operational Guides
 * [Embedding Upgrade Guide](docs/EMBEDDING_UPGRADE_GUIDE.md) - Migrating to 2048-dimensional embeddings
-* **Development Setup** - Local development environment (planned, see Testing & Development section above)
-* **Contributing Guide** - Contribution guidelines (planned, see Contributing section below)
+* [Operator Manual](docs/OPERATOR_MANUAL.md) - Operations and maintenance guide
+* [Deployment](docs/DEPLOYMENT.md) - Deployment procedures
+
+### Evaluation & Integration
+* [Memlayer Evaluation](docs/MEMLAYER_EVALUATION.md) - Evaluation of memlayer integration
+* [Integration Summary](docs/archive/INTEGRATION_SUMMARY.md) - FLUSTERCUCKER + DavBest integration
+* [Phase 3 Summary](docs/archive/PHASE3_SUMMARY.md) - Phase 3A deliverables summary
+
+### Archive
+* [Archive Documentation](docs/archive/) - Historical documentation and summaries
 
 ---
 
