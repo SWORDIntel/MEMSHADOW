@@ -22,6 +22,14 @@ class MemshadowMetricsRegistry:
         "memshadow_batches_received",
         "memshadow_conflicts_detected",
         "memshadow_psych_events_ingested",
+        "memshadow_psych_messages",
+        "memshadow_threat_messages",
+        "memshadow_memory_messages",
+        "memshadow_federation_messages",
+        "memshadow_improvement_messages",
+        "memshadow_unknown_messages",
+        "memshadow_unknown_msg_type",
+        "memshadow_parse_errors",
     )
 
     def __init__(self, latency_window: int = 512):

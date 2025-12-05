@@ -9,8 +9,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from config.memshadow_config import get_memshadow_config
+from dsmil_protocol import MemshadowHeader, MessageType, Priority
+from ..metrics.memshadow_metrics import get_memshadow_metrics_registry
 from ..plugins.ingest.memshadow_ingest import (
-    MemshadowIngestPlugin,
+    BrainMemoryFacade,
+    MemshadowIntelEdgeProcessor,
     ingest_memshadow_binary as global_ingest_binary,
     ingest_memshadow_legacy as global_ingest_legacy,
 )
@@ -21,10 +24,19 @@ logger = logging.getLogger(__name__)
 class ShrinkIntelEndpoint:
     """Process POST /api/v1/ingest/shrink requests."""
 
-    def __init__(self, brain_interface: Any = None, ingest_plugin: Optional[MemshadowIngestPlugin] = None):
+    def __init__(
+        self,
+        brain_interface: Any = None,
+        processor: Optional[MemshadowIntelEdgeProcessor] = None,
+    ):
         self.brain_interface = brain_interface
         self._config = get_memshadow_config()
-        self._plugin = ingest_plugin or MemshadowIngestPlugin(brain_interface=brain_interface)
+        self._metrics = get_memshadow_metrics_registry()
+        self._processor = processor or MemshadowIntelEdgeProcessor(
+            config=self._config,
+            metrics=self._metrics,
+            brain_memory_facade=BrainMemoryFacade(brain_interface),
+        )
 
     # ------------------------------------------------------------------ routing
     def handle_post(self, request_data: bytes, content_type: str = "application/octet-stream") -> Tuple[Dict[str, Any], int]:
@@ -33,28 +45,27 @@ class ShrinkIntelEndpoint:
 
         try:
             if content_type.startswith("application/octet-stream") or content_type.startswith("application/x-"):
-                result = self._plugin.ingest_memshadow_binary(request_data, brain_interface=self.brain_interface)
+                records = self._processor.ingest_bytes(request_data, source="shrink", source_type="shrink")
             elif content_type == "application/json":
                 payload = json.loads(request_data.decode() or "{}")
-                result = self._plugin.ingest_memshadow_legacy(payload, brain_interface=self.brain_interface)
+                message_bytes = self._wrap_json_as_memshadow(payload)
+                records = self._processor.ingest_bytes(message_bytes, source="shrink", source_type="json")
             else:
-                # Attempt binary first, fallback to JSON
                 try:
-                    result = self._plugin.ingest_memshadow_binary(request_data, brain_interface=self.brain_interface)
+                    records = self._processor.ingest_bytes(request_data, source="shrink", source_type="binary")
                 except Exception:
                     payload = json.loads(request_data.decode() or "{}")
-                    result = self._plugin.ingest_memshadow_legacy(payload, brain_interface=self.brain_interface)
+                    message_bytes = self._wrap_json_as_memshadow(payload)
+                    records = self._processor.ingest_bytes(message_bytes, source="shrink", source_type="json")
 
-            status_code = 200 if result.success else 400
+            summary = self._summarize_records(records)
             response = {
-                "success": result.success,
+                "success": True,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "metadata": result.metadata,
-                "items_ingested": result.items_ingested,
-                "bytes_processed": result.bytes_processed,
-                "errors": result.errors,
+                "records_ingested": summary,
+                "record_count": sum(summary.values()),
             }
-            return response, status_code
+            return response, 200
         except json.JSONDecodeError as exc:
             logger.warning("SHRINK ingest JSON parse error: %s", exc)
             return self._failure_response("Invalid JSON payload", status=400)
@@ -75,6 +86,25 @@ class ShrinkIntelEndpoint:
             },
             status,
         )
+
+    def _wrap_json_as_memshadow(self, payload: Dict[str, Any]) -> bytes:
+        msg_type = MessageType.THREAT_REPORT
+        if payload.get("type") == "psych_event":
+            msg_type = MessageType.PSYCH_ASSESSMENT
+        body = json.dumps(payload).encode()
+        header = MemshadowHeader(
+            msg_type=msg_type,
+            priority=Priority.NORMAL,
+            payload_len=len(body),
+        )
+        return header.pack() + body
+
+    def _summarize_records(self, records: List[Any]) -> Dict[str, int]:
+        summary: Dict[str, int] = {}
+        for record in records:
+            category = getattr(record, "category", "unknown")
+            summary[category] = summary.get(category, 0) + 1
+        return summary
 
 
 # --------------------------------------------------------------------- adapters

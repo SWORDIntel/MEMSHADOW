@@ -42,6 +42,11 @@ class MemshadowConfig:
     compression_threshold_bytes: int = 1024
     enable_p2p_for_critical: bool = True
     enable_shrink_ingest: bool = True
+    enable_psych_ingest: bool = True
+    enable_threat_ingest: bool = True
+    enable_memory_ingest: bool = True
+    enable_federation_ingest: bool = True
+    enable_improvement_ingest: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -50,6 +55,11 @@ class MemshadowConfig:
             "compression_threshold_bytes": self.compression_threshold_bytes,
             "enable_p2p_for_critical": self.enable_p2p_for_critical,
             "enable_shrink_ingest": self.enable_shrink_ingest,
+            "enable_psych_ingest": self.enable_psych_ingest,
+            "enable_threat_ingest": self.enable_threat_ingest,
+            "enable_memory_ingest": self.enable_memory_ingest,
+            "enable_federation_ingest": self.enable_federation_ingest,
+            "enable_improvement_ingest": self.enable_improvement_ingest,
         }
 
 
@@ -80,6 +90,11 @@ def _apply_env_overrides(config: MemshadowConfig) -> MemshadowConfig:
         "MEMSHADOW_COMPRESSION_THRESHOLD_BYTES": "compression_threshold_bytes",
         "MEMSHADOW_ENABLE_P2P_FOR_CRITICAL": "enable_p2p_for_critical",
         "MEMSHADOW_ENABLE_SHRINK_INGEST": "enable_shrink_ingest",
+        "MEMSHADOW_ENABLE_PSYCH_INGEST": "enable_psych_ingest",
+        "MEMSHADOW_ENABLE_THREAT_INGEST": "enable_threat_ingest",
+        "MEMSHADOW_ENABLE_MEMORY_INGEST": "enable_memory_ingest",
+        "MEMSHADOW_ENABLE_FEDERATION_INGEST": "enable_federation_ingest",
+        "MEMSHADOW_ENABLE_IMPROVEMENT_INGEST": "enable_improvement_ingest",
     }
 
     for env_key, field_name in env_mapping.items():
