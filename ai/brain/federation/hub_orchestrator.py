@@ -27,6 +27,8 @@ from pathlib import Path
 import json
 import time
 
+from ..plugins.ingest.memshadow_ingest import ingest_memshadow_binary
+
 logger = logging.getLogger(__name__)
 
 # Try to import dsmil-mesh library
@@ -417,7 +419,7 @@ class HubOrchestrator:
     """
 
     def __init__(self, hub_id: str = "dsmil-central", mesh_port: int = 8889,
-                 use_mesh: bool = True):
+                 use_mesh: bool = True, brain_interface: Any = None):
         """
         Initialize hub orchestrator
 
@@ -429,6 +431,7 @@ class HubOrchestrator:
         self.hub_id = hub_id
         self.mesh_port = mesh_port
         self.use_mesh = use_mesh and MESH_AVAILABLE
+        self._brain_interface = brain_interface
 
         # Node registry
         self._nodes: Dict[str, RegisteredNode] = {}
@@ -447,6 +450,12 @@ class HubOrchestrator:
         self._mesh: Optional[QuantumMesh] = None
         if self.use_mesh:
             self._init_mesh()
+
+        # MEMSHADOW gateway
+        from .memshadow_gateway import HubMemshadowGateway  # Local import to avoid cycles
+        self._memshadow_gateway = HubMemshadowGateway(self.hub_id)
+        if self._mesh:
+            self._memshadow_gateway.mesh_send = self._mesh.send
 
         # Callbacks
         self.on_node_registered: Optional[Callable[[str], None]] = None
@@ -469,6 +478,10 @@ class HubOrchestrator:
         }
 
         logger.info(f"HubOrchestrator initialized: {hub_id} (mesh={'enabled' if self.use_mesh else 'disabled'})")
+
+    @property
+    def memshadow_gateway(self):
+        return self._memshadow_gateway
 
     def _init_mesh(self):
         """Initialize mesh network"""
@@ -573,29 +586,30 @@ class HubOrchestrator:
         Routes psych assessments to memory tiers and broadcasts to network.
         """
         try:
-            # Try binary MEMSHADOW protocol first
+            handled_binary = False
             if PROTOCOL_AVAILABLE and len(data) >= HEADER_SIZE:
-                try:
-                    header = MemshadowHeader.unpack(data[:HEADER_SIZE])
-                    psych_data = self._parse_psych_binary(data, header)
-                except:
-                    # Fallback to JSON
-                    psych_data = json.loads(data.decode())
-            else:
+                ingest_result = ingest_memshadow_binary(data, brain_interface=getattr(self, "_brain_interface", None))
+                if ingest_result.success and ingest_result.data:
+                    handled_binary = True
+                    for event in ingest_result.data:
+                        logger.info("Received MEMSHADOW psych intel from %s (session=%s)", peer_id, event.get("session_id"))
+                        self._store_psych_intel(event, peer_id)
+                        if self._is_significant_psych_update(event):
+                            self._broadcast_psych_intel(event, exclude_node=peer_id)
+                    if self.on_intel_received:
+                        self.on_intel_received({
+                            "type": "psych_intel",
+                            "data": ingest_result.data,
+                            "source": peer_id,
+                        })
+            if not handled_binary:
                 psych_data = json.loads(data.decode())
-
-            logger.info(f"Received psych intel from {peer_id}: {psych_data.get('type', 'unknown')}")
-
-            # Store in memory tiers
-            self._store_psych_intel(psych_data, peer_id)
-
-            # Broadcast to other nodes if significant
-            if self._is_significant_psych_update(psych_data):
-                self._broadcast_psych_intel(psych_data, exclude_node=peer_id)
-
-            # Trigger callback
-            if self.on_intel_received:
-                self.on_intel_received({"type": "psych_intel", "data": psych_data, "source": peer_id})
+                logger.info(f"Received psych intel from {peer_id}: {psych_data.get('type', 'unknown')}")
+                self._store_psych_intel(psych_data, peer_id)
+                if self._is_significant_psych_update(psych_data):
+                    self._broadcast_psych_intel(psych_data, exclude_node=peer_id)
+                if self.on_intel_received:
+                    self.on_intel_received({"type": "psych_intel", "data": psych_data, "source": peer_id})
 
         except Exception as e:
             logger.error(f"Error handling psych intel: {e}")
@@ -1220,6 +1234,12 @@ class HubOrchestrator:
                     len(q) for q in self._reconciliation_queue.values()
                 ),
             }
+
+    async def handle_memshadow_message(self, header: MemshadowHeader, payload: bytes, source_node: str) -> Dict[str, Any]:
+        """
+        Delegate MEMSHADOW control-plane messages to the gateway.
+        """
+        return await self._memshadow_gateway.handle_memshadow_message(header, payload, source_node)
 
 
 if __name__ == "__main__":

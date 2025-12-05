@@ -1,74 +1,201 @@
 #!/usr/bin/env python3
-"""
-MEMSHADOW Protocol Ingest Plugin for DSMIL Brain
+"""MEMSHADOW Protocol ingest plugin focused on SHRINK PSYCH events."""
 
-Parses MEMSHADOW binary protocol messages (v2) and extracts:
-- Psychological events from SHRINK kernel module
-- Improvement announcements
-- Memory tier sync data
+from __future__ import annotations
 
-This plugin handles the binary wire format defined in:
-- libs/memshadow-protocol/c/include/dsmil_protocol.h
-- libs/memshadow-protocol/python/dsmil_protocol.py
-"""
-
-import sys
+import json
 import logging
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from config.memshadow_config import get_memshadow_config
 
 # Add libs path for protocol imports
-libs_path = Path(__file__).parent.parent.parent.parent.parent / "libs" / "memshadow-protocol" / "python"
-if libs_path.exists() and str(libs_path) not in sys.path:
-    sys.path.insert(0, str(libs_path))
+LIBS_PATH = (
+    Path(__file__).parent.parent.parent.parent.parent / "libs" / "memshadow-protocol" / "python"
+)
+if LIBS_PATH.exists() and str(LIBS_PATH) not in sys.path:
+    sys.path.insert(0, str(LIBS_PATH))
 
 logger = logging.getLogger(__name__)
 
 try:
     from dsmil_protocol import (
-        MemshadowMessage, MemshadowHeader, PsychEvent,
-        MessageType, Priority, HEADER_SIZE, PSYCH_EVENT_SIZE,
-        detect_protocol_version
+        HEADER_SIZE,
+        MEMSHADOW_VERSION,
+        MemshadowHeader,
+        MessageFlags,
+        MessageType,
+        Priority,
+        PsychEvent,
+        PSYCH_EVENT_SIZE,
     )
+
     PROTOCOL_AVAILABLE = True
 except ImportError:
     PROTOCOL_AVAILABLE = False
-    HEADER_SIZE = 32
-    PSYCH_EVENT_SIZE = 64
-    logger.warning("MEMSHADOW protocol library not available")
+    logger.error("MEMSHADOW protocol library not available - ingest disabled")
 
-try:
-    from mrac_registry import update_register, update_heartbeat, update_command_ack
-except Exception:
-    def update_register(app_id: str, name: str, capabilities: Dict[str, Any]):  # type: ignore
-        return
-    def update_heartbeat(app_id: str, telemetry: Dict[str, Any]):  # type: ignore
-        return
-    def update_command_ack(app_id: str, command_id: str, status: str):  # type: ignore
-        return
+from ...metrics.memshadow_metrics import get_memshadow_metrics_registry
+from ...memory.episodic_memory import EventType
+from ...memory.working_memory import ItemPriority
+from ..ingest_framework import IngestPlugin, IngestResult
 
-try:
-    from ..ingest_framework import IngestPlugin, IngestResult
-except ImportError:
-    # Fallback for direct execution
-    import sys
-    from pathlib import Path
-    parent = Path(__file__).parent.parent
-    if str(parent) not in sys.path:
-        sys.path.insert(0, str(parent))
-    from ingest_framework import IngestPlugin, IngestResult
+PSYCH_MESSAGE_TYPES: Sequence[MessageType] = (
+    MessageType.PSYCH_ASSESSMENT,
+    MessageType.DARK_TRIAD_UPDATE,
+    MessageType.RISK_UPDATE,
+    MessageType.NEURO_UPDATE,
+    MessageType.TMI_UPDATE,
+    MessageType.COGNITIVE_UPDATE,
+    MessageType.FULL_PSYCH,
+    MessageType.PSYCH_THREAT_ALERT,
+    MessageType.PSYCH_ANOMALY,
+    MessageType.PSYCH_RISK_THRESHOLD,
+)
 
-logger = logging.getLogger(__name__)
+
+@dataclass
+class PsychEventRecord:
+    """Normalized representation of a parsed PSYCH event."""
+
+    message_type: str
+    session_id: int
+    timestamp_ns: int
+    timestamp_offset_us: int
+    event_type: int
+    window_size: int
+    context_hash: int
+    priority: str
+    flags: int
+    batch_index: int
+    scores: Dict[str, float]
+    dark_triad_average: float
+    confidence: float
+
+    def to_dict(self) -> Dict[str, Any]:  # pragma: no cover - convenience
+        return {
+            "message_type": self.message_type,
+            "session_id": self.session_id,
+            "timestamp_ns": self.timestamp_ns,
+            "timestamp_offset_us": self.timestamp_offset_us,
+            "event_type": self.event_type,
+            "window_size": self.window_size,
+            "context_hash": self.context_hash,
+            "priority": self.priority,
+            "flags": self.flags,
+            "batch_index": self.batch_index,
+            "scores": self.scores,
+            "dark_triad_average": self.dark_triad_average,
+            "confidence": self.confidence,
+        }
+
+
+class BrainMemoryFacade:
+    """Helper that writes events into the available memory tiers."""
+
+    def __init__(self, brain_interface: Any):
+        self._brain = brain_interface
+        self.working = self._resolve_attr("working_memory")
+        self.episodic = self._resolve_attr("episodic_memory")
+        self.semantic = self._resolve_attr("semantic_memory")
+
+    def _resolve_attr(self, name: str) -> Optional[Any]:
+        if not self._brain:
+            return None
+        if hasattr(self._brain, name):
+            return getattr(self._brain, name)
+        # Allow private attribute naming (_working_memory, etc.)
+        private_name = f"_{name}"
+        return getattr(self._brain, private_name, None)
+
+    def store_psych_events(self, events: Sequence[PsychEventRecord]) -> None:
+        if not self._brain:
+            return
+        for record in events:
+            self._store_working(record)
+            self._store_episodic(record)
+            self._store_semantic(record)
+
+    def _store_working(self, record: PsychEventRecord) -> None:
+        if not self.working or not hasattr(self.working, "store"):
+            return
+        exposure = record.scores.get("espionage_exposure", 0.0)
+        priority = (
+            ItemPriority.CRITICAL if exposure >= 0.85 else ItemPriority.HIGH if exposure >= 0.65 else ItemPriority.NORMAL
+        )
+        metadata = {
+            "source": "shrink",
+            "message_type": record.message_type,
+            "dark_triad_average": record.dark_triad_average,
+        }
+        try:
+            self.working.store(
+                key=f"psych_session:{record.session_id}",
+                content=record.to_dict(),
+                content_type="psych_event",
+                priority=priority,
+                metadata=metadata,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug("Working memory store failed: %s", exc)
+
+    def _store_episodic(self, record: PsychEventRecord) -> None:
+        if not self.episodic or not hasattr(self.episodic, "record_event"):
+            return
+        importance = min(1.0, 0.4 + record.dark_triad_average * 0.5)
+        context = {
+            "session_id": record.session_id,
+            "priority": record.priority,
+            "message_type": record.message_type,
+            "scores": record.scores,
+        }
+        try:
+            self.episodic.record_event(
+                EventType.OBSERVATION,
+                content=record.to_dict(),
+                context=context,
+                importance=importance,
+                metadata={"source": "shrink"},
+                tags={"psych", "shrink"},
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("Episodic memory record failed: %s", exc)
+
+    def _store_semantic(self, record: PsychEventRecord) -> None:
+        if not self.semantic or not hasattr(self.semantic, "add_fact"):
+            return
+        try:
+            subject = f"psych_session:{record.session_id}"
+            risk_label = (
+                "CRITICAL_RISK"
+                if record.scores.get("espionage_exposure", 0.0) >= 0.85
+                else "HIGH_RISK"
+                if record.scores.get("espionage_exposure", 0.0) >= 0.65
+                else "BASELINE"
+            )
+            self.semantic.add_fact(
+                subject=subject,
+                predicate="INDICATES",
+                obj=risk_label,
+                confidence=record.confidence,
+                metadata={"source": "shrink"},
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("Semantic memory add_fact failed: %s", exc)
 
 
 class MemshadowIngestPlugin(IngestPlugin):
-    """
-    MEMSHADOW Protocol Ingest Plugin
+    """Binary MEMSHADOW ingest plugin dedicated to SHRINK PSYCH payloads."""
 
-    Parses binary MEMSHADOW protocol messages and extracts structured data
-    for storage in memory tiers.
-    """
+    def __init__(self, brain_interface: Any = None):
+        self._config = get_memshadow_config()
+        self._enabled = PROTOCOL_AVAILABLE and self._config.enable_shrink_ingest
+        self._brain_interface = brain_interface
+        self._metrics = get_memshadow_metrics_registry()
+        self._allowed_message_types = set(PSYCH_MESSAGE_TYPES)
 
     @property
     def name(self) -> str:
@@ -76,346 +203,231 @@ class MemshadowIngestPlugin(IngestPlugin):
 
     @property
     def version(self) -> str:
-        return "1.0.0"
+        return "2.0.0"
 
     @property
     def description(self) -> str:
-        return "Ingest MEMSHADOW binary protocol messages (SHRINK psych events, improvements, etc.)"
+        return "Parse and store MEMSHADOW PSYCH events from SHRINK receivers"
 
     @property
     def supported_types(self) -> List[str]:
-        return ["memshadow", "binary", "psych_event", "improvement"]
+        return ["memshadow", "binary", "psych_event"]
 
-    def __init__(self):
-        if not PROTOCOL_AVAILABLE:
-            logger.error("MEMSHADOW protocol library not available - plugin disabled")
-        self._enabled = PROTOCOL_AVAILABLE
+    def set_brain_interface(self, brain_interface: Any) -> None:
+        self._brain_interface = brain_interface
 
     def initialize(self, config: Dict[str, Any]) -> bool:
-        """Initialize plugin"""
         if not PROTOCOL_AVAILABLE:
             return False
-        self._enabled = config.get("enabled", True)
-        logger.info(f"MemshadowIngestPlugin initialized (enabled={self._enabled})")
-        return True
+        self._enabled = config.get("enabled", True) and self._config.enable_shrink_ingest
+        self._brain_interface = config.get("brain_interface", self._brain_interface)
+        allowed = config.get("allowed_message_types")
+        if allowed:
+            resolved = set()
+            for item in allowed:
+                try:
+                    resolved.add(MessageType[item])
+                except KeyError:
+                    continue
+            if resolved:
+                self._allowed_message_types = resolved
+        return self._enabled
 
+    # ------------------------------------------------------------------ Ingest
     def ingest(self, source: Any, **kwargs) -> IngestResult:
-        """
-        Ingest MEMSHADOW protocol binary data
-
-        Args:
-            source: bytes containing MEMSHADOW protocol message(s)
-            **kwargs: Additional options
-
-        Returns:
-            IngestResult with parsed data and metadata
-        """
         if not self._enabled:
             return IngestResult(
                 success=False,
                 plugin_name=self.name,
-                errors=["Plugin disabled - protocol library not available"],
+                errors=["MEMSHADOW ingest disabled"],
             )
 
+        brain_interface = kwargs.get("brain_interface") or self._brain_interface
+
+        if isinstance(source, dict):
+            return self.ingest_memshadow_legacy(source, brain_interface)
+
+        data = self._coerce_bytes(source)
+        if data is None:
+            return IngestResult(
+                success=False,
+                plugin_name=self.name,
+                errors=[f"Unsupported source type: {type(source)}"],
+            )
+        return self.ingest_memshadow_binary(data, brain_interface)
+
+    def ingest_memshadow_binary(
+        self, data: bytes, brain_interface: Any = None
+    ) -> IngestResult:
+        if not PROTOCOL_AVAILABLE:
+            return IngestResult(
+                success=False,
+                plugin_name=self.name,
+                errors=["Protocol library unavailable"],
+            )
         try:
-            # Get bytes
-            if isinstance(source, bytes):
-                data = source
-            elif isinstance(source, (str, Path)):
-                with open(source, "rb") as f:
-                    data = f.read()
-            elif hasattr(source, "read"):
-                data = source.read()
-            else:
-                return IngestResult(
-                    success=False,
-                    plugin_name=self.name,
-                    errors=[f"Unsupported source type: {type(source)}"],
-                )
+            messages = self._parse_messages(data)
+            records: List[PsychEventRecord] = []
+            for header, events in messages:
+                for idx, event in enumerate(events):
+                    records.append(self._build_record(header, event, idx))
 
-            if len(data) < HEADER_SIZE:
-                return IngestResult(
-                    success=False,
-                    plugin_name=self.name,
-                    errors=[f"Data too short: {len(data)} < {HEADER_SIZE}"],
-                )
+            facade = BrainMemoryFacade(brain_interface or self._brain_interface)
+            facade.store_psych_events(records)
 
-            # Detect protocol version
-            try:
-                version = detect_protocol_version(data)
-            except Exception as e:
-                return IngestResult(
-                    success=False,
-                    plugin_name=self.name,
-                    errors=[f"Failed to detect protocol version: {e}"],
-                )
-
-            # Parse message(s)
-            parsed_messages = []
-            offset = 0
-            items_ingested = 0
-            bytes_processed = 0
-
-            while offset < len(data):
-                try:
-                    # Try to parse a message
-                    remaining = data[offset:]
-                    if len(remaining) < HEADER_SIZE:
-                        break
-
-                    # Parse header
-                    header = MemshadowHeader.unpack(remaining)
-
-                    # Check if we have full message
-                    total_message_size = HEADER_SIZE + header.payload_len
-                    if len(remaining) < total_message_size:
-                        logger.warning(f"Incomplete message at offset {offset}, need {total_message_size} bytes")
-                        break
-
-                    # Parse full message
-                    message = MemshadowMessage.unpack(remaining[:total_message_size])
-                    parsed_messages.append(message)
-
-                    # Extract structured data based on message type
-                    extracted_data = self._extract_message_data(message)
-                    if extracted_data:
-                        items_ingested += len(extracted_data) if isinstance(extracted_data, list) else 1
-
-                    bytes_processed += total_message_size
-                    offset += total_message_size
-
-                except Exception as e:
-                    logger.error(f"Error parsing message at offset {offset}: {e}")
-                    # Try to skip to next potential message start
-                    # Look for magic number
-                    magic_pos = remaining.find(b"MSHW", 1)
-                    if magic_pos > 0:
-                        offset += magic_pos
-                    else:
-                        break
-
-            # Build metadata
-            metadata = {
-                "protocol_version": version,
-                "messages_parsed": len(parsed_messages),
-                "bytes_processed": bytes_processed,
-                "message_types": [msg.header.msg_type for msg in parsed_messages],
-            }
-
-            # Extract all data from messages
-            all_extracted_data = []
-            for msg in parsed_messages:
-                extracted = self._extract_message_data(msg)
-                if extracted:
-                    if isinstance(extracted, list):
-                        all_extracted_data.extend(extracted)
-                    else:
-                        all_extracted_data.append(extracted)
+            self._metrics.increment("memshadow_psych_events_ingested", len(records))
+            self._metrics.increment("memshadow_batches_received", len(messages))
 
             return IngestResult(
                 success=True,
                 plugin_name=self.name,
-                data=all_extracted_data if all_extracted_data else parsed_messages,
-                metadata=metadata,
-                items_ingested=items_ingested,
-                bytes_processed=bytes_processed,
+                data=[r.to_dict() for r in records],
+                metadata={
+                    "messages_parsed": len(messages),
+                    "events_ingested": len(records),
+                    "protocol_version": MEMSHADOW_VERSION,
+                },
+                items_ingested=len(records),
+                bytes_processed=len(data),
             )
-
-        except Exception as e:
-            logger.error(f"Error ingesting MEMSHADOW data: {e}", exc_info=True)
+        except ValueError as exc:
             return IngestResult(
                 success=False,
                 plugin_name=self.name,
-                errors=[str(e)],
+                errors=[str(exc)],
             )
 
-    def _extract_message_data(self, message: MemshadowMessage) -> Optional[List[Dict[str, Any]]]:
-        """
-        Extract structured data from a MEMSHADOW message
+    def ingest_memshadow_legacy(
+        self, payload: Dict[str, Any], brain_interface: Any = None
+    ) -> IngestResult:
+        try:
+            record = PsychEventRecord(
+                message_type=payload.get("message_type", "PSYCH_ASSESSMENT"),
+                session_id=payload.get("session_id", 0),
+                timestamp_ns=payload.get("timestamp_ns", 0),
+                timestamp_offset_us=payload.get("timestamp_offset_us", 0),
+                event_type=payload.get("event_type", 0),
+                window_size=payload.get("window_size", 0),
+                context_hash=payload.get("context_hash", 0),
+                priority=payload.get("priority", "NORMAL"),
+                flags=payload.get("flags", 0),
+                batch_index=payload.get("batch_index", 0),
+                scores=payload.get("scores", {}),
+                dark_triad_average=payload.get("dark_triad_average", 0.0),
+                confidence=payload.get("confidence", 0.5),
+            )
+            facade = BrainMemoryFacade(brain_interface or self._brain_interface)
+            facade.store_psych_events([record])
+            self._metrics.increment("memshadow_psych_events_ingested", 1)
+            return IngestResult(
+                success=True,
+                plugin_name=self.name,
+                data=[record.to_dict()],
+                metadata={"format": "legacy_json"},
+                items_ingested=1,
+                bytes_processed=len(json.dumps(payload).encode()),
+            )
+        except Exception as exc:
+            return IngestResult(
+                success=False,
+                plugin_name=self.name,
+                errors=[str(exc)],
+            )
 
-        Returns:
-            List of extracted data dictionaries, or None
-        """
-        extracted = []
-
-        # Handle psychological events
-        if message.header.msg_type in (
-            MessageType.PSYCH_ASSESSMENT,
-            MessageType.DARK_TRIAD_UPDATE,
-            MessageType.RISK_UPDATE,
-            MessageType.NEURO_UPDATE,
-            MessageType.TMI_UPDATE,
-            MessageType.COGNITIVE_UPDATE,
-            MessageType.FULL_PSYCH,
-            MessageType.PSYCH_THREAT_ALERT,
-            MessageType.PSYCH_ANOMALY,
-            MessageType.PSYCH_RISK_THRESHOLD,
-        ):
-            # Extract psych events
-            for event in message.events:
-                event_data = {
-                    "type": "psych_event",
-                    "message_type": message.header.msg_type,
-                    "session_id": event.session_id,
-                    "timestamp_ns": message.header.timestamp_ns,
-                    "timestamp_offset_us": event.timestamp_offset_us,
-                    "event_type": event.event_type,
-                    "window_size": event.window_size,
-                    "context_hash": event.context_hash,
-                    "scores": {
-                        "acute_stress": event.acute_stress,
-                        "machiavellianism": event.machiavellianism,
-                        "narcissism": event.narcissism,
-                        "psychopathy": event.psychopathy,
-                        "burnout_probability": event.burnout_probability,
-                        "espionage_exposure": event.espionage_exposure,
-                        "confidence": event.confidence,
-                    },
-                    "dark_triad_average": event.dark_triad_average,
-                }
-                extracted.append(event_data)
-
-        # Handle improvement messages
-        elif message.header.msg_type == MessageType.IMPROVEMENT_ANNOUNCE:
-            # Parse improvement announcement
+    # ----------------------------------------------------------------- Helpers
+    def _coerce_bytes(self, source: Any) -> Optional[bytes]:
+        if isinstance(source, bytes):
+            return source
+        if isinstance(source, (str, Path)):
             try:
-                from improvement_types import ImprovementAnnouncement
-                announcement = ImprovementAnnouncement.unpack(message.raw_payload)
-                extracted.append({
-                    "type": "improvement_announcement",
-                    "improvement_id": announcement.improvement_id,
-                    "improvement_type": announcement.improvement_type,
-                    "priority": announcement.priority,
-                    "source_node_id": announcement.source_node_id,
-                    "improvement_percentage": announcement.improvement_percentage,
-                    "size_bytes": announcement.size_bytes,
-                })
-            except Exception as e:
-                logger.debug(f"Could not parse improvement announcement: {e}")
+                with open(source, "rb") as handle:
+                    return handle.read()
+            except Exception as exc:
+                logger.error("Failed to read source %s: %s", source, exc)
+                return None
+        if hasattr(source, "read"):
+            return source.read()
+        return None
 
-        elif message.header.msg_type == MessageType.IMPROVEMENT_PAYLOAD:
-            # Parse improvement package
+    def _parse_messages(self, data: bytes) -> List[Tuple[MemshadowHeader, List[PsychEvent]]]:
+        messages: List[Tuple[MemshadowHeader, List[PsychEvent]]] = []
+        offset = 0
+        while offset + HEADER_SIZE <= len(data):
+            header = MemshadowHeader.unpack(data[offset : offset + HEADER_SIZE])
+            if header.msg_type not in self._allowed_message_types:
+                raise ValueError(f"Unsupported msg_type: {header.msg_type.name}")
+
+            total_size = HEADER_SIZE + header.payload_len
+            if offset + total_size > len(data):
+                raise ValueError("Truncated MEMSHADOW payload")
+
+            payload = data[offset + HEADER_SIZE : offset + total_size]
+            if len(payload) != header.payload_len:
+                raise ValueError("Payload length mismatch")
+
+            events = self._parse_psych_events(payload)
+            if not events:
+                logger.debug("No psych events decoded for msg_type=%s", header.msg_type.name)
+            messages.append((header, events))
+            offset += total_size
+
+        if offset != len(data):
+            logger.debug("Trailing bytes detected after MEMSHADOW parsing (%d bytes)", len(data) - offset)
+        return messages
+
+    def _parse_psych_events(self, payload: bytes) -> List[PsychEvent]:
+        events: List[PsychEvent] = []
+        pos = 0
+        while pos + PSYCH_EVENT_SIZE <= len(payload):
+            chunk = payload[pos : pos + PSYCH_EVENT_SIZE]
             try:
-                from improvement_types import ImprovementPackage
-                package = ImprovementPackage.unpack(message.raw_payload)
-                extracted.append({
-                    "type": "improvement_package",
-                    "improvement_id": package.improvement_id,
-                    "improvement_type": package.improvement_type,
-                    "priority": package.priority,
-                    "source_node_id": package.source_node_id,
-                    "improvement_percentage": package.improvement_percentage,
-                    "baseline_metrics": {
-                        "accuracy": package.baseline_metrics.accuracy,
-                        "latency_ms": package.baseline_metrics.latency_ms,
-                    },
-                    "improved_metrics": {
-                        "accuracy": package.improved_metrics.accuracy,
-                        "latency_ms": package.improved_metrics.latency_ms,
-                    },
-                })
-            except Exception as e:
-                logger.debug(f"Could not parse improvement package: {e}")
+                events.append(PsychEvent.unpack(chunk))
+            except ValueError as exc:
+                logger.warning("Failed to parse PsychEvent: %s", exc)
+                break
+            pos += PSYCH_EVENT_SIZE
+        return events
 
-        # Threat/Intel reports (payload is JSON)
-        elif message.header.msg_type in (
-            MessageType.THREAT_REPORT,
-            MessageType.INTEL_REPORT,
-            MessageType.BRAIN_INTEL_REPORT,
-            MessageType.INTEL_PROPAGATE,
-        ):
-            try:
-                import json
-                payload = json.loads(message.raw_payload.decode())
-                if isinstance(payload, dict) and payload.get("records"):
-                    for rec in payload.get("records", []):
-                        extracted.append({
-                            "type": "intel_report",
-                            "source": payload.get("source"),
-                            "account": payload.get("account"),
-                            "record": rec,
-                            "count": payload.get("count"),
-                        })
-                else:
-                    extracted.append({
-                        "type": "intel_report",
-                        "payload": payload,
-                    })
-            except Exception as e:
-                logger.debug(f"Could not parse intel payload: {e}")
-
-        # Handle other message types
-        elif message.header.msg_type in (MessageType.HEARTBEAT, MessageType.ACK, MessageType.NACK):
-            extracted.append({
-                "type": "control_message",
-                "message_type": message.header.msg_type,
-                "timestamp_ns": message.header.timestamp_ns,
-                "sequence_num": message.header.sequence_num,
-            })
-
-        # MRAC Remote Control (0x2101-0x21FF)
-        elif 0x2100 <= message.header.msg_type <= 0x21FF:
-            try:
-                mrac = self._parse_mrac(message)
-                if mrac:
-                    extracted.append(mrac)
-            except Exception as e:
-                logger.debug(f"MRAC parse failure: {e}")
-
-        return extracted if extracted else None
-
-    def _parse_mrac(self, message: MemshadowMessage) -> Optional[Dict[str, Any]]:
-        payload = message.raw_payload
-        if len(payload) < 24:
-            return None
-        nonce = payload[16:24]
-        offset = 24
-
-        def read_bytes(n: int) -> bytes:
-            nonlocal offset
-            if offset + n > len(payload):
-                raise ValueError("payload too short")
-            chunk = payload[offset:offset + n]
-            offset += n
-            return chunk
-
-        msg_type = message.header.msg_type
-        if msg_type == 0x2101:  # APP_REGISTER
-            app_id = read_bytes(16).hex()
-            cap_len = int.from_bytes(read_bytes(2), "big")
-            name_len = int.from_bytes(read_bytes(1), "big")
-            name = read_bytes(name_len).decode(errors="ignore") if name_len else ""
-            capabilities = {}
-            if cap_len:
-                cap_bytes = read_bytes(cap_len)
-                try:
-                    import json
-                    capabilities = json.loads(cap_bytes.decode())
-                except Exception:
-                    capabilities = {"raw": cap_bytes.hex()}
-            update_register(app_id, name, capabilities)
-            return {"type": "mrac_register", "app_id": app_id, "name": name, "capabilities": capabilities}
-
-        if msg_type == 0x2106:  # APP_HEARTBEAT
-            app_id = read_bytes(16).hex()
-            uptime_ms = int.from_bytes(read_bytes(8), "big")
-            load_pct = int.from_bytes(read_bytes(1), "big")
-            temp_c = int.from_bytes(read_bytes(1), "big")
-            telemetry = {"uptime_ms": uptime_ms, "load_pct": load_pct, "temp_c": temp_c}
-            update_heartbeat(app_id, telemetry)
-            return {"type": "mrac_heartbeat", "app_id": app_id, "telemetry": telemetry}
-
-        if msg_type == 0x2104:  # APP_COMMAND_ACK
-            app_id = read_bytes(16).hex()
-            cmd_id = int.from_bytes(read_bytes(8), "big")
-            status = int.from_bytes(read_bytes(1), "big")
-            update_command_ack(app_id, str(cmd_id), str(status))
-            return {"type": "mrac_command_ack", "app_id": app_id, "command_id": cmd_id, "status": status}
-
-        # Generic MRAC fallback
-        return {
-            "type": "mrac_raw",
-            "msg_type": msg_type,
-            "nonce": nonce.hex(),
-            "payload_hex": payload.hex(),
+    def _build_record(
+        self, header: MemshadowHeader, event: PsychEvent, batch_index: int
+    ) -> PsychEventRecord:
+        scores = {
+            "acute_stress": event.acute_stress,
+            "machiavellianism": event.machiavellianism,
+            "narcissism": event.narcissism,
+            "psychopathy": event.psychopathy,
+            "burnout_probability": event.burnout_probability,
+            "espionage_exposure": event.espionage_exposure,
+            "confidence": event.confidence,
         }
+        return PsychEventRecord(
+            message_type=header.msg_type.name,
+            session_id=event.session_id,
+            timestamp_ns=header.timestamp_ns,
+            timestamp_offset_us=event.timestamp_offset_us,
+            event_type=event.event_type,
+            window_size=event.window_size,
+            context_hash=event.context_hash,
+            priority=header.priority.name if isinstance(header.priority, Priority) else str(header.priority),
+            flags=int(header.flags) if isinstance(header.flags, MessageFlags) else int(header.flags or 0),
+            batch_index=batch_index,
+            scores=scores,
+            dark_triad_average=event.dark_triad_average,
+            confidence=event.confidence,
+        )
+
+
+# ---------------------------------------------------------------- convenience
+_default_plugin = MemshadowIngestPlugin()
+
+
+def ingest_memshadow_binary(data: bytes, brain_interface: Any = None) -> IngestResult:
+    if brain_interface:
+        _default_plugin.set_brain_interface(brain_interface)
+    return _default_plugin.ingest_memshadow_binary(data, brain_interface)
+
+
+def ingest_memshadow_legacy(payload: Dict[str, Any], brain_interface: Any = None) -> IngestResult:
+    if brain_interface:
+        _default_plugin.set_brain_interface(brain_interface)
+    return _default_plugin.ingest_memshadow_legacy(payload, brain_interface)
