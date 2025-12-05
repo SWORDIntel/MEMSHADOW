@@ -10,6 +10,8 @@ Features:
 - Batch routing (hub-relay vs P2P based on priority)
 - Per-node/per-tier sync vectors
 - Metrics and observability
+- Layer-aware metadata attachment
+- Layer 8 security hooks for THREAT and PSYCH events
 
 This module integrates with HubOrchestrator to provide MEMSHADOW protocol support.
 """
@@ -29,7 +31,6 @@ from config.memshadow_config import get_memshadow_config
 
 logger = logging.getLogger(__name__)
 _MEMSHADOW_CONFIG = get_memshadow_config()
-_MEMSHADOW_METRICS = get_memshadow_metrics_registry()
 
 # Import MEMSHADOW protocol
 try:
@@ -68,7 +69,25 @@ except ImportError:
         SYNC_PROTOCOL_AVAILABLE = False
         logger.warning("Memory sync protocol not available")
 
+# Import layer mapping and bandwidth governor
+try:
+    from ..memory.memshadow_layer_mapping import (
+        DSMILLayer, MemshadowCategory, LayerMapping,
+        get_target_layers_for_category, get_devices_for_category,
+        get_category_layer_mapping, should_trigger_layer8_hook,
+    )
+    from ..memory.memshadow_bandwidth_governor import (
+        MemshadowBandwidthGovernor, GovernorConfig, AcceptDecision,
+        DegradationMode, SyncMode, get_bandwidth_governor,
+    )
+    LAYER_AWARE = True
+except ImportError:
+    LAYER_AWARE = False
+    logger.warning("Layer mapping/governor not available")
+
 from ..metrics.memshadow_metrics import get_memshadow_metrics_registry
+
+_MEMSHADOW_METRICS = get_memshadow_metrics_registry()
 
 
 @dataclass
@@ -98,6 +117,7 @@ class HubMemshadowGateway:
     
     Coordinates memory synchronization across all registered nodes.
     Handles routing decisions based on message priority.
+    Now layer-aware with Layer 8 security hooks.
     
     Usage:
         gateway = HubMemshadowGateway(hub_id="central-hub")
@@ -113,6 +133,9 @@ class HubMemshadowGateway:
         
         # Route incoming batch
         await gateway.route_batch(batch)
+        
+        # Register Layer 8 security hook
+        gateway.register_layer8_hook(my_security_callback)
     """
     
     def __init__(self, hub_id: str, mesh_send: Optional[Callable] = None):
@@ -126,7 +149,7 @@ class HubMemshadowGateway:
         self.hub_id = hub_id
         self.mesh_send = mesh_send
         self._config = _MEMSHADOW_CONFIG
-        self._metrics = _MEMSHADOW_METRICS
+        self._metrics_registry = _MEMSHADOW_METRICS
         
         # Node registry
         self._nodes: Dict[str, NodeMemoryCapabilities] = {}
@@ -140,7 +163,7 @@ class HubMemshadowGateway:
         # Pending batches awaiting ACK
         self._pending_batches: Dict[str, Tuple[MemorySyncBatch, datetime]] = {}
         
-        # Metrics
+        # Local metrics counters
         self._metrics = {
             "batches_routed": 0,
             "p2p_routes": 0,
@@ -148,6 +171,7 @@ class HubMemshadowGateway:
             "conflicts_resolved": 0,
             "bytes_synced": 0,
             "nodes_synced": 0,
+            "layer8_hooks_triggered": 0,
         }
         
         # Sync manager for hub's own operations
@@ -156,7 +180,185 @@ class HubMemshadowGateway:
         else:
             self._sync_manager = None
         
-        logger.info(f"HubMemshadowGateway initialized: {hub_id}")
+        # NEW: Bandwidth governor integration
+        self._bandwidth_governor: Optional[MemshadowBandwidthGovernor] = None
+        if LAYER_AWARE:
+            self._bandwidth_governor = get_bandwidth_governor()
+        
+        # NEW: Layer 8 security hooks (callbacks for THREAT/PSYCH events)
+        self._layer8_hooks: List[Callable] = []
+        self._layer8_enabled = self._config.enable_layer8_hooks if hasattr(self._config, 'enable_layer8_hooks') else True
+        
+        logger.info(f"HubMemshadowGateway initialized: {hub_id} (layer_aware={LAYER_AWARE})")
+    
+    # =========================================================================
+    # NEW: Layer 8 Security Hooks
+    # =========================================================================
+    
+    def register_layer8_hook(self, callback: Callable) -> None:
+        """
+        Register a callback for Layer 8 security events.
+        
+        The callback will be invoked for THREAT and PSYCH events that meet
+        the priority threshold for Layer 8 routing.
+        
+        Callback signature:
+            callback(event_data: Dict[str, Any]) -> None
+            
+        event_data contains:
+            - category: str (e.g., "psych", "threat")
+            - priority: int (0-4)
+            - layer_metadata: dict with target layers and devices
+            - payload_bytes: int
+            - source_node: str
+            - timestamp_ns: int
+            - confidence: float (if available)
+            - risk_level: str (if available)
+        
+        Args:
+            callback: Function to call when Layer 8 events occur
+        """
+        self._layer8_hooks.append(callback)
+        logger.info(f"Registered Layer 8 security hook: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}")
+    
+    def unregister_layer8_hook(self, callback: Callable) -> bool:
+        """Remove a previously registered Layer 8 hook."""
+        if callback in self._layer8_hooks:
+            self._layer8_hooks.remove(callback)
+            return True
+        return False
+    
+    def _trigger_layer8_hooks(
+        self,
+        category: str,
+        priority: int,
+        payload_bytes: int,
+        source_node: str,
+        additional_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Trigger Layer 8 hooks if conditions are met.
+        
+        This is called internally when processing THREAT/PSYCH events.
+        """
+        if not self._layer8_enabled or not self._layer8_hooks:
+            return
+        
+        # Check if this event should trigger Layer 8
+        if LAYER_AWARE:
+            cat_enum = MemshadowCategory.from_string(category)
+            if not should_trigger_layer8_hook(cat_enum, priority):
+                return
+        elif priority < 2:  # Fallback: HIGH and above
+            return
+        
+        # Build event data
+        event_data = {
+            "category": category,
+            "priority": priority,
+            "payload_bytes": payload_bytes,
+            "source_node": source_node,
+            "timestamp_ns": time.time_ns(),
+        }
+        
+        # Add layer metadata if available
+        if LAYER_AWARE:
+            cat_enum = MemshadowCategory.from_string(category)
+            mapping = get_category_layer_mapping(cat_enum)
+            event_data["layer_metadata"] = {
+                "primary_layers": [l.name for l in mapping.primary_layers],
+                "secondary_layers": [l.name for l in mapping.secondary_layers],
+                "priority_weight": mapping.priority_weight,
+                "allows_degradation": mapping.allows_degradation,
+            }
+            devices = get_devices_for_category(cat_enum, layer=DSMILLayer.SECURITY_ANALYTICS)
+            event_data["layer8_devices"] = [
+                {"device_id": d.device_id, "device_type": d.device_type}
+                for d in devices
+            ]
+        
+        # Add any additional data
+        if additional_data:
+            event_data.update(additional_data)
+        
+        # Invoke hooks
+        self._metrics["layer8_hooks_triggered"] += 1
+        self._metrics_registry.record_layer8_hook()
+        
+        for hook in self._layer8_hooks:
+            try:
+                hook(event_data)
+            except Exception as e:
+                logger.warning(f"Layer 8 hook failed: {e}")
+    
+    # =========================================================================
+    # NEW: Layer-Aware Metadata
+    # =========================================================================
+    
+    def attach_layer_metadata(self, event: Dict[str, Any], category: str) -> Dict[str, Any]:
+        """
+        Attach layer-aware metadata to an event for federation pipelines.
+        
+        Args:
+            event: The event dictionary to enrich
+            category: MEMSHADOW category name
+            
+        Returns:
+            Enriched event with layer metadata
+        """
+        if not LAYER_AWARE:
+            return event
+        
+        cat_enum = MemshadowCategory.from_string(category)
+        mapping = get_category_layer_mapping(cat_enum)
+        
+        event["_memshadow_layer_metadata"] = {
+            "category": category,
+            "primary_layers": [l.value for l in mapping.primary_layers],
+            "secondary_layers": [l.value for l in mapping.secondary_layers],
+            "priority_weight": mapping.priority_weight,
+            "allows_degradation": mapping.allows_degradation,
+            "target_devices": [
+                {
+                    "layer": d.layer.value,
+                    "device_id": d.device_id,
+                    "device_type": d.device_type,
+                }
+                for d in mapping.devices
+            ],
+        }
+        
+        return event
+    
+    def get_bandwidth_decision(
+        self,
+        payload_bytes: int,
+        category: str,
+        priority: int,
+    ) -> Tuple[AcceptDecision, Optional[DegradationMode]]:
+        """
+        Get bandwidth governor decision for a frame.
+        
+        Args:
+            payload_bytes: Size of payload
+            category: MEMSHADOW category name
+            priority: Priority level (0-4)
+            
+        Returns:
+            Tuple of (AcceptDecision, current DegradationMode or None)
+        """
+        if not LAYER_AWARE or not self._bandwidth_governor:
+            return AcceptDecision.ACCEPT, None
+        
+        cat_enum = MemshadowCategory.from_string(category)
+        decision = self._bandwidth_governor.should_accept(
+            payload_bytes=payload_bytes,
+            category=cat_enum,
+            priority=priority,
+        )
+        mode = self._bandwidth_governor.get_degradation_mode(cat_enum)
+        
+        return decision, mode
     
     def register_node(self, node_id: str, endpoint: str,
                      memory_tiers: Dict[MemoryTier, int],
@@ -270,6 +472,8 @@ class HubMemshadowGateway:
         - HIGH: Hub-relayed with priority queue
         - NORMAL/LOW: Standard hub routing
         
+        Now integrated with bandwidth governor for rate limiting.
+        
         Args:
             batch: The sync batch to route
             priority: Override priority (otherwise uses batch default)
@@ -283,13 +487,31 @@ class HubMemshadowGateway:
         results: Dict[str, bool] = {}
         self._metrics["batches_routed"] += 1
         
-        # Determine routing mode
-        allow_p2p = self._config.enable_p2p_for_critical
-        use_p2p = allow_p2p and (should_route_p2p(priority) if PROTOCOL_AVAILABLE else priority.value >= Priority.CRITICAL.value)
-        
         # Pack batch if needed
         batch_data = batch.pack()
-        self._metrics["bytes_synced"] += len(batch_data)
+        batch_bytes = len(batch_data)
+        priority_value = int(priority) if isinstance(priority, int) else priority.value
+        
+        # Check bandwidth governor before routing
+        decision, degradation_mode = self.get_bandwidth_decision(batch_bytes, "memory", priority_value)
+        
+        if decision == AcceptDecision.DROP:
+            logger.debug(f"Batch dropped by bandwidth governor: {batch.batch_id}")
+            self._metrics_registry.record_dropped_frame(7, "memory", batch_bytes, reason="bandwidth_guard")
+            return {"_dropped": True}
+        
+        # Record metrics
+        if decision == AcceptDecision.DEGRADE:
+            self._metrics_registry.record_degraded_frame(7, "memory", batch_bytes)
+            # Potentially compress or batch more aggressively in degraded mode
+        else:
+            self._metrics_registry.record_layer_category_bytes(7, "memory", batch_bytes)
+        
+        self._metrics["bytes_synced"] += batch_bytes
+        
+        # Determine routing mode
+        allow_p2p = self._config.enable_p2p_for_critical
+        use_p2p = allow_p2p and (should_route_p2p(priority) if PROTOCOL_AVAILABLE else priority_value >= Priority.CRITICAL.value)
         
         if use_p2p:
             # P2P routing: send directly to target + notify hub
@@ -303,8 +525,8 @@ class HubMemshadowGateway:
                         await self.mesh_send(target, batch_data)
                     results[target] = True
                     logger.debug(f"P2P routed batch to {target}")
-                    _MEMSHADOW_METRICS.increment("memshadow_batches_sent")
-                    _MEMSHADOW_METRICS.observe_latency((time.time() - send_start) * 1000)
+                    self._metrics_registry.increment("memshadow_batches_sent")
+                    self._metrics_registry.observe_latency((time.time() - send_start) * 1000)
                 except Exception as e:
                     logger.error(f"P2P route failed to {target}: {e}")
                     results[target] = False
@@ -325,8 +547,8 @@ class HubMemshadowGateway:
                         await self.mesh_send(node_id, batch_data)
                     results[node_id] = True
                     logger.debug(f"Hub routed batch to {node_id}")
-                    _MEMSHADOW_METRICS.increment("memshadow_batches_sent")
-                    _MEMSHADOW_METRICS.observe_latency((time.time() - send_start) * 1000)
+                    self._metrics_registry.increment("memshadow_batches_sent")
+                    self._metrics_registry.observe_latency((time.time() - send_start) * 1000)
                 except Exception as e:
                     logger.error(f"Hub route failed to {node_id}: {e}")
                     results[node_id] = False
@@ -348,7 +570,45 @@ class HubMemshadowGateway:
     async def handle_memshadow_message(self, header: MemshadowHeader, payload: bytes, source_node: str) -> Dict[str, Any]:
         """
         Handle arbitrary MEMSHADOW messages routed to the hub.
+        
+        Now layer-aware with bandwidth governance and Layer 8 hooks.
         """
+        payload_bytes = len(payload)
+        priority = int(header.priority) if hasattr(header.priority, 'value') else int(header.priority)
+        
+        # Determine category from message type
+        msg_type_value = int(header.msg_type)
+        category = self._get_category_from_msg_type(msg_type_value)
+        
+        # Check bandwidth governor
+        decision, degradation_mode = self.get_bandwidth_decision(payload_bytes, category, priority)
+        
+        if decision == AcceptDecision.DROP:
+            self._metrics_registry.record_dropped_frame(
+                layer_id=7,  # PRIMARY_AI_MEMORY
+                category=category,
+                byte_count=payload_bytes,
+                reason="bandwidth_guard",
+            )
+            return {"status": "dropped", "reason": "bandwidth_limit_exceeded"}
+        
+        # Record accepted/degraded frame
+        if decision == AcceptDecision.DEGRADE:
+            self._metrics_registry.record_degraded_frame(layer_id=7, category=category, byte_count=payload_bytes)
+        else:
+            self._metrics_registry.record_layer_category_bytes(layer_id=7, category=category, byte_count=payload_bytes)
+        
+        # Trigger Layer 8 hooks for PSYCH and THREAT categories
+        if category in ("psych", "threat"):
+            self._trigger_layer8_hooks(
+                category=category,
+                priority=priority,
+                payload_bytes=payload_bytes,
+                source_node=source_node,
+                additional_data={"msg_type": header.msg_type.name if hasattr(header.msg_type, 'name') else str(header.msg_type)},
+            )
+        
+        # Handle specific message types
         if header.msg_type == MessageType.MEMORY_SYNC:
             data = header.pack() + payload
             return await self.handle_incoming_batch(data, source_node)
@@ -368,9 +628,23 @@ class HubMemshadowGateway:
             MessageType.IMPROVEMENT_REQUEST,
         ):
             logger.debug("Improvement message routed via gateway: %s", header.msg_type.name)
-            return {"status": "ack", "action": "improvement_passthrough"}
+            return {"status": "ack", "action": "improvement_passthrough", "degradation_mode": degradation_mode.name if degradation_mode else None}
 
         return {"status": "ignored", "reason": f"unsupported_msg_type:{header.msg_type.name}"}
+    
+    def _get_category_from_msg_type(self, msg_type_value: int) -> str:
+        """Derive category string from MessageType numeric value."""
+        if 0x0100 <= msg_type_value <= 0x01FF:
+            return "psych"
+        if 0x0200 <= msg_type_value <= 0x02FF:
+            return "threat"
+        if 0x0300 <= msg_type_value <= 0x03FF:
+            return "memory"
+        if 0x0400 <= msg_type_value <= 0x04FF:
+            return "federation"
+        if 0x0500 <= msg_type_value <= 0x05FF:
+            return "improvement"
+        return "unknown"
     
     async def handle_incoming_batch(self, data: bytes, source_node: str) -> Dict:
         """

@@ -54,6 +54,23 @@ try:
 except Exception:  # pragma: no cover
     ImprovementTracker = None  # type: ignore
 
+# Layer mapping and bandwidth governor imports
+try:
+    from ...memory.memshadow_layer_mapping import (
+        DSMILLayer, MemshadowCategory as LayerCategory,
+        get_target_layers_for_category, get_category_layer_mapping,
+        should_trigger_layer8_hook,
+    )
+    from ...memory.memshadow_bandwidth_governor import (
+        MemshadowBandwidthGovernor, get_bandwidth_governor,
+        AcceptDecision, DegradationMode, SyncMode,
+    )
+    LAYER_AWARE = True
+except Exception:  # pragma: no cover
+    LAYER_AWARE = False
+    DSMILLayer = None
+    LayerCategory = None
+
 from ...metrics.memshadow_metrics import get_memshadow_metrics_registry, MemshadowMetricsRegistry
 from ...memory.episodic_memory import EventType
 from ...memory.working_memory import ItemPriority
@@ -294,7 +311,12 @@ class BrainMemoryFacade:
 
 
 class MemshadowIntelEdgeProcessor:
-    """Canonical MEMSHADOW edge intel processor."""
+    """
+    Canonical MEMSHADOW edge intel processor.
+    
+    Now layer-aware with bandwidth governance integration for early reject/degrade
+    and per-layer statistics tracking.
+    """
 
     def __init__(
         self,
@@ -304,6 +326,7 @@ class MemshadowIntelEdgeProcessor:
         hub_gateway: Optional[HubMemshadowGateway] = None,
         memory_sync_manager: Optional[MemorySyncManager] = None,
         improvement_tracker: Optional[ImprovementTracker] = None,
+        bandwidth_governor: Optional["MemshadowBandwidthGovernor"] = None,
     ):
         self.config = config or get_memshadow_config()
         self.metrics = metrics or get_memshadow_metrics_registry()
@@ -311,6 +334,67 @@ class MemshadowIntelEdgeProcessor:
         self.hub_gateway = hub_gateway
         self.memory_sync_manager = memory_sync_manager
         self.improvement_tracker = improvement_tracker
+        
+        # NEW: Bandwidth governor for early reject/degrade
+        self._bandwidth_governor = bandwidth_governor
+        if self._bandwidth_governor is None and LAYER_AWARE:
+            try:
+                self._bandwidth_governor = get_bandwidth_governor()
+            except Exception:
+                pass
+        
+        # NEW: Layer 8 hooks for security events
+        self._layer8_hooks: List[callable] = []
+    
+    # =========================================================================
+    # NEW: Layer 8 Hook Registration
+    # =========================================================================
+    
+    def register_layer8_hook(self, callback: callable) -> None:
+        """
+        Register a callback for Layer 8 security events.
+        
+        Callback signature: callback(category, priority, event_data, metadata)
+        """
+        self._layer8_hooks.append(callback)
+    
+    def _trigger_layer8_hooks(
+        self,
+        category: str,
+        priority: int,
+        event_data: Dict[str, Any],
+        payload_bytes: int,
+    ) -> None:
+        """Trigger Layer 8 hooks if conditions are met."""
+        if not self._layer8_hooks:
+            return
+        
+        # Check if Layer 8 should be triggered
+        should_trigger = priority >= 2  # HIGH and above by default
+        if LAYER_AWARE:
+            cat_enum = LayerCategory.from_string(category)
+            should_trigger = should_trigger_layer8_hook(cat_enum, priority)
+        
+        if not should_trigger:
+            return
+        
+        metadata = {
+            "payload_bytes": payload_bytes,
+            "layer_aware": LAYER_AWARE,
+        }
+        
+        if LAYER_AWARE:
+            cat_enum = LayerCategory.from_string(category)
+            mapping = get_category_layer_mapping(cat_enum)
+            metadata["target_layers"] = [l.value for l in mapping.all_layers]
+        
+        self.metrics.record_layer8_hook()
+        
+        for hook in self._layer8_hooks:
+            try:
+                hook(category, priority, event_data, metadata)
+            except Exception as e:
+                logger.warning(f"Layer 8 hook failed: {e}")
 
     # ------------------------------------------------------------------ Public API
     def ingest_bytes(self, payload: bytes, source: str, source_type: str = "shrink") -> List[BaseIntelRecord]:
@@ -323,8 +407,47 @@ class MemshadowIntelEdgeProcessor:
         for parsed in messages:
             self.metrics.increment("memshadow_batches_received")
             category = self._categorize(parsed.header.msg_type)
+            payload_bytes = len(parsed.payload)
+            priority = int(parsed.header.priority) if hasattr(parsed.header.priority, 'value') else int(parsed.header.priority)
+            
+            # Get primary layer for this category
+            layer_id = DSMILLayer.PRIMARY_AI_MEMORY.value if DSMILLayer else 7
+            if LAYER_AWARE:
+                cat_enum = LayerCategory.from_string(category)
+                layers = get_target_layers_for_category(cat_enum, include_secondary=False)
+                if layers:
+                    layer_id = min(l.value for l in layers)
+            
+            # NEW: Check bandwidth governor for early reject/degrade
+            if self._bandwidth_governor and LAYER_AWARE:
+                cat_enum = LayerCategory.from_string(category)
+                decision = self._bandwidth_governor.should_accept(
+                    payload_bytes=payload_bytes,
+                    category=cat_enum,
+                    priority=priority,
+                    record_sample=True,
+                )
+                
+                if decision == AcceptDecision.DROP:
+                    logger.debug(
+                        "Frame dropped by bandwidth governor: category=%s, priority=%d, size=%d",
+                        category, priority, payload_bytes,
+                    )
+                    self.metrics.record_dropped_frame(layer_id, category, payload_bytes, reason="bandwidth_guard")
+                    continue  # Skip this message
+                
+                if decision == AcceptDecision.DEGRADE:
+                    self.metrics.record_degraded_frame(layer_id, category, payload_bytes)
+                    # Could apply degradation logic here (summarize, etc.)
+                else:
+                    self.metrics.record_layer_category_bytes(layer_id, category, payload_bytes)
+            else:
+                # No governor, just record bytes
+                self.metrics.record_layer_category_bytes(layer_id, category, payload_bytes)
+            
             if not self._category_enabled(category):
                 logger.debug("Skipping %s ingest because category disabled", category)
+                self.metrics.record_dropped_frame(layer_id, category, payload_bytes, reason="config_disabled")
                 continue
 
             handler = getattr(self, f"_handle_{category}", None)
@@ -364,6 +487,29 @@ class MemshadowIntelEdgeProcessor:
             raw_payload=parsed.payload,
             events=psych_records,
         )
+        
+        # NEW: Trigger Layer 8 hooks for high-priority psych events
+        priority = int(parsed.header.priority) if hasattr(parsed.header.priority, 'value') else int(parsed.header.priority)
+        if psych_records:
+            # Check for high-risk indicators
+            max_exposure = max((r.scores.get("espionage_exposure", 0) for r in psych_records), default=0)
+            max_dark_triad = max((r.dark_triad_average for r in psych_records), default=0)
+            
+            hook_data = {
+                "event_count": len(psych_records),
+                "max_espionage_exposure": max_exposure,
+                "max_dark_triad_average": max_dark_triad,
+                "source": source,
+                "msg_type": parsed.header.msg_type.name,
+            }
+            
+            # Elevate priority if high-risk indicators detected
+            effective_priority = priority
+            if max_exposure >= 0.7 or max_dark_triad >= 0.7:
+                effective_priority = max(priority, 2)  # At least HIGH
+            
+            self._trigger_layer8_hooks("psych", effective_priority, hook_data, len(parsed.payload))
+        
         return [record]
 
     def _handle_threat(self, parsed: ParsedMemshadowMessage, source: str, source_type: str) -> ThreatIntelRecord:
@@ -386,6 +532,18 @@ class MemshadowIntelEdgeProcessor:
         if self.brain_facade:
             self.brain_facade.store_threat_record(record)
         self.metrics.increment("memshadow_threat_messages")
+        
+        # NEW: Trigger Layer 8 hooks for threat intel (always at NORMAL+ priority)
+        priority = int(parsed.header.priority) if hasattr(parsed.header.priority, 'value') else int(parsed.header.priority)
+        hook_data = {
+            "indicator": intel.get("indicator"),
+            "severity": intel.get("severity", "unknown"),
+            "confidence": intel.get("confidence", 0.5),
+            "source": source,
+            "msg_type": parsed.header.msg_type.name,
+        }
+        self._trigger_layer8_hooks("threat", max(priority, 1), hook_data, len(parsed.payload))
+        
         return record
 
     def _handle_memory(self, parsed: ParsedMemshadowMessage, source: str, source_type: str) -> MemoryIntelRecord:
