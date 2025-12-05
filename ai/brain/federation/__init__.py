@@ -1,74 +1,76 @@
+#!/usr/bin/env python3
 """
-DSMIL Brain Federation
+DSMIL Brain Federation Layer
 
-Distributed intelligence network with hub-spoke architecture and P2P capabilities.
+Hub-spoke architecture for distributed intelligence:
+- DSMIL as central hub (query originator, aggregator)
+- Spoke nodes (local correlation, no NL interface)
+- Offline/peer coordination mode
+- Intel propagation and sync
 
-Components:
-- HubOrchestrator: Central coordination with MEMSHADOW gateway
-- SpokeClient: Node client with SpokeMemoryAdapter
-- ImprovementTracker: Detects and packages improvements
-- ImprovementTypes: Improvement package definitions
-
-Usage:
-    from ai.brain.federation import HubOrchestrator, SpokeClient
-    
-    hub = HubOrchestrator(hub_id="dsmil-central")
-    spoke = SpokeClient(node_id="node-001", hub_endpoint="hub.local:8000")
+Central Hub Query Model:
+- All NL queries originate from hub
+- Hub distributes to relevant nodes
+- Nodes correlate locally, return results
+- Hub aggregates and synthesizes
 """
 
 from .hub_orchestrator import (
     HubOrchestrator,
-    HubMemshadowGateway,
-    NodeCapability,
-    NodeMemoryCapabilities,
-    RegisteredNode,
-    QueryPriority,
+    DistributedQuery,
     AggregatedResponse,
+    NodeCapability,
 )
 
 from .spoke_client import (
     SpokeClient,
-    SpokeMemoryAdapter,
-    LocalTierInterface,
-    InMemoryTier,
-    QuerySource,
+    LocalCorrelation,
     QueryResponse,
+    SpokeState,
 )
 
-from .improvement_types import (
-    ImprovementType,
-    ImprovementPriority,
-    ImprovementPackage,
-    ImprovementMetrics,
+from .offline_coordinator import (
+    OfflineCoordinator,
+    PeerNetwork,
+    ConsensusProtocol,
 )
 
-from .improvement_tracker import (
-    ImprovementTracker,
-    MetricWindow,
+from .intel_propagator import (
+    IntelPropagator,
+    IntelReport,
+    PropagationPriority,
 )
 
+from .sync_protocol import (
+    SyncProtocol,
+    DeltaSync,
+    SyncState,
+    ConflictResolution,
+)
 
 __all__ = [
     # Hub
     "HubOrchestrator",
-    "HubMemshadowGateway",
-    "NodeCapability",
-    "NodeMemoryCapabilities",
-    "RegisteredNode",
-    "QueryPriority",
+    "DistributedQuery",
     "AggregatedResponse",
+    "NodeCapability",
     # Spoke
     "SpokeClient",
-    "SpokeMemoryAdapter",
-    "LocalTierInterface",
-    "InMemoryTier",
-    "QuerySource",
+    "LocalCorrelation",
     "QueryResponse",
-    # Improvements
-    "ImprovementType",
-    "ImprovementPriority",
-    "ImprovementPackage",
-    "ImprovementMetrics",
-    "ImprovementTracker",
-    "MetricWindow",
+    "SpokeState",
+    # Offline
+    "OfflineCoordinator",
+    "PeerNetwork",
+    "ConsensusProtocol",
+    # Intel
+    "IntelPropagator",
+    "IntelReport",
+    "PropagationPriority",
+    # Sync
+    "SyncProtocol",
+    "DeltaSync",
+    "SyncState",
+    "ConflictResolution",
 ]
+

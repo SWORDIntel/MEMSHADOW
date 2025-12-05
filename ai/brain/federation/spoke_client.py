@@ -1,943 +1,1021 @@
+#!/usr/bin/env python3
 """
-Spoke Client with MEMSHADOW Memory Adapter
+Spoke Client for DSMIL Brain Federation
 
-Node client for the DSMIL Brain Federation that:
-- Receives queries from hub and performs local correlation
-- Operates autonomously when hub is offline
-- Participates in P2P improvement propagation
-- Exposes local memory tiers via SpokeMemoryAdapter
-
-Based on: HUB_DOCS/DSMIL Brain Federation.md
+Node client that:
+- NO local NL interface (queries from hub only)
+- Receives queries from hub
+- Performs local correlation and analysis
+- Returns results to hub
+- Operates autonomously when hub offline
+- Coordinates with peers when needed
 """
 
 import asyncio
-import json
+import hashlib
+import threading
+import logging
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
-from uuid import uuid4
-
-import structlog
-
-# Import canonical protocol
 import sys
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List, Any, Callable, Set
+from datetime import datetime, timezone, timedelta
+from enum import Enum, auto
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "libs" / "memshadow-protocol" / "python"))
+import json
 
-from dsmil_protocol import (
-    MemshadowHeader,
-    MemshadowMessage,
-    MessageType,
-    Priority,
-    MessageFlags,
-    MemoryTier,
-    should_route_p2p,
-    HEADER_SIZE,
-)
+logger = logging.getLogger(__name__)
 
-# Import memory sync protocol
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from memory.memory_sync_protocol import (
-    MemorySyncItem,
-    MemorySyncBatch,
-    MemorySyncManager,
-    SyncPriority,
-    SyncConfig,
-    SyncOperation,
-)
+# Try to import dsmil-mesh library
+try:
+    libs_path = Path(__file__).parent.parent.parent.parent / "libs" / "dsmil-mesh" / "python"
+    if libs_path.exists() and str(libs_path) not in sys.path:
+        sys.path.insert(0, str(libs_path))
 
-logger = structlog.get_logger()
+    from mesh import QuantumMesh, Peer, MeshConfig
+    from messages import MessageTypes, MessagePriority
+    MESH_AVAILABLE = True
+except ImportError:
+    MESH_AVAILABLE = False
+    QuantumMesh = None
+    MessageTypes = None
+    MessagePriority = None
+    logger.warning("dsmil-mesh not available - using simulated mode")
+
+# Try to import improvement types
+try:
+    from .improvement_types import (
+        ImprovementPackage, ImprovementAnnouncement, ImprovementAck,
+        ImprovementReject, ImprovementPriority
+    )
+    from .improvement_tracker import ImprovementTracker
+    IMPROVEMENT_AVAILABLE = True
+except ImportError:
+    IMPROVEMENT_AVAILABLE = False
+    logger.debug("Improvement types not available")
 
 
-# ============================================================================
-# Query Types
-# ============================================================================
+class SpokeState(Enum):
+    """State of the spoke node"""
+    INITIALIZING = auto()
+    CONNECTED = auto()      # Connected to hub
+    DISCONNECTED = auto()   # Disconnected from hub
+    AUTONOMOUS = auto()     # Operating independently
+    PEER_MODE = auto()      # Coordinating with peers
+    SYNCING = auto()        # Syncing with hub
+    COMPROMISED = auto()    # Security issue detected
+
 
 class QuerySource(Enum):
-    """Source of incoming query"""
-    HUB = "hub"
-    PEER = "peer"
-    LOCAL = "local"
+    """Source of a query"""
+    HUB = auto()           # From central hub
+    PEER = auto()          # From peer node
+    INTERNAL = auto()      # Internal system query
+    # NO USER - queries don't come from local users
+
+
+@dataclass
+class LocalCorrelation:
+    """Result of local correlation"""
+    correlation_id: str
+    query_id: str
+
+    # Results
+    matches: List[Dict] = field(default_factory=list)
+    relationships: List[Dict] = field(default_factory=list)
+    patterns: List[Dict] = field(default_factory=list)
+
+    # Confidence
+    confidence: float = 0.5
+    evidence_count: int = 0
+
+    # Timing
+    processing_time_ms: float = 0.0
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
 class QueryResponse:
     """Response to a query"""
     query_id: str
-    results: List[Dict[str, Any]]
-    confidence: float
-    processing_time_ms: float
-    source: QuerySource
+    node_id: str
 
+    # Result
+    success: bool
+    correlation: Optional[LocalCorrelation] = None
+    error: Optional[str] = None
 
-# ============================================================================
-# Local Memory Tier Interface
-# ============================================================================
+    # Source tracking
+    data_sources: List[str] = field(default_factory=list)
 
-class LocalTierInterface:
-    """Interface for local memory tier implementations"""
-    
-    async def store(self, item_id: str, data: bytes, metadata: Dict[str, Any]) -> bool:
-        raise NotImplementedError
-    
-    async def retrieve(self, item_id: str) -> Optional[bytes]:
-        raise NotImplementedError
-    
-    async def delete(self, item_id: str) -> bool:
-        raise NotImplementedError
-    
-    async def list_items(self, since_timestamp: Optional[int] = None) -> List[str]:
-        raise NotImplementedError
-    
-    async def get_metadata(self, item_id: str) -> Optional[Dict[str, Any]]:
-        raise NotImplementedError
+    # Confidence
+    confidence: float = 0.5
 
+    # Timing
+    response_time_ms: float = 0.0
 
-class InMemoryTier(LocalTierInterface):
-    """Simple in-memory tier implementation for testing"""
-    
-    def __init__(self, tier: MemoryTier):
-        self.tier = tier
-        self._store: Dict[str, bytes] = {}
-        self._metadata: Dict[str, Dict[str, Any]] = {}
-    
-    async def store(self, item_id: str, data: bytes, metadata: Dict[str, Any]) -> bool:
-        self._store[item_id] = data
-        self._metadata[item_id] = {**metadata, "stored_at": int(time.time() * 1e9)}
-        return True
-    
-    async def retrieve(self, item_id: str) -> Optional[bytes]:
-        return self._store.get(item_id)
-    
-    async def delete(self, item_id: str) -> bool:
-        self._store.pop(item_id, None)
-        self._metadata.pop(item_id, None)
-        return True
-    
-    async def list_items(self, since_timestamp: Optional[int] = None) -> List[str]:
-        if since_timestamp is None:
-            return list(self._store.keys())
-        return [
-            k for k, m in self._metadata.items()
-            if m.get("stored_at", 0) >= since_timestamp
-        ]
-    
-    async def get_metadata(self, item_id: str) -> Optional[Dict[str, Any]]:
-        return self._metadata.get(item_id)
-
-
-# ============================================================================
-# Spoke Memory Adapter
-# ============================================================================
-
-class SpokeMemoryAdapter:
-    """
-    Spoke-side adapter for local memory tiers.
-    
-    Responsibilities:
-    - Wrap access to local L1/L2/L3 tiers
-    - Create delta batches for sync to hub/peers
-    - Apply incoming sync batches with conflict resolution
-    - Expose P2P sync entrypoints
-    - Propagate self-improvement updates via MEMSHADOW
-    """
-    
-    def __init__(
-        self,
-        node_id: str,
-        hub_node_id: str = "hub",
-        mesh_send_callback: Optional[Callable] = None,
-        config: Optional[SyncConfig] = None,
-    ):
-        self.node_id = node_id
-        self.hub_node_id = hub_node_id
-        self.mesh_send = mesh_send_callback
-        self.config = config or SyncConfig()
-        
-        # Local memory tiers
-        self._tiers: Dict[MemoryTier, LocalTierInterface] = {}
-        
-        # Sync manager for delta computation
-        self._sync_manager = MemorySyncManager(
-            node_id=node_id,
-            config=config,
-            mesh_send_callback=mesh_send_callback,
-        )
-        
-        # P2P peers
-        self._peers: Set[str] = set()
-        
-        # Pending batches for retry
-        self._pending_batches: Dict[str, MemorySyncBatch] = {}
-        
-        # Metrics
-        self._metrics = {
-            "items_stored": 0,
-            "items_retrieved": 0,
-            "batches_sent": 0,
-            "batches_received": 0,
-            "p2p_syncs": 0,
-            "hub_syncs": 0,
-            "improvements_propagated": 0,
-        }
-        
-        logger.info("SpokeMemoryAdapter initialized", node_id=node_id)
-    
-    def register_tier(self, tier: MemoryTier, instance: LocalTierInterface):
-        """Register a local memory tier implementation"""
-        self._tiers[tier] = instance
-        self._sync_manager.register_memory_tier(tier, instance)
-        logger.info("Tier registered", tier=tier.name, node=self.node_id)
-    
-    def add_peer(self, peer_id: str):
-        """Add a P2P peer for direct sync"""
-        self._peers.add(peer_id)
-        logger.debug("Peer added", peer=peer_id)
-    
-    def remove_peer(self, peer_id: str):
-        """Remove a P2P peer"""
-        self._peers.discard(peer_id)
-    
-    # ========================================================================
-    # Local Storage Operations
-    # ========================================================================
-    
-    async def store(
-        self,
-        tier: MemoryTier,
-        data: bytes,
-        metadata: Optional[Dict[str, Any]] = None,
-        sync_priority: SyncPriority = SyncPriority.NORMAL,
-    ) -> str:
-        """
-        Store data in a local tier and optionally sync.
-        
-        Returns:
-            Item ID
-        """
-        if tier not in self._tiers:
-            raise ValueError(f"Tier {tier.name} not registered")
-        
-        item_id = str(uuid4())
-        metadata = metadata or {}
-        
-        # Store locally
-        tier_impl = self._tiers[tier]
-        await tier_impl.store(item_id, data, metadata)
-        
-        # Create sync item for tracking
-        sync_item = MemorySyncItem.create(
-            payload=data,
-            tier=tier,
-            operation=SyncOperation.INSERT,
-            priority=sync_priority,
-            source_node=self.node_id,
-        )
-        sync_item.item_id = uuid4()
-        sync_item.metadata = metadata
-        
-        # Store in sync manager
-        await self._sync_manager.store_local(sync_item)
-        
-        self._metrics["items_stored"] += 1
-        
-        logger.debug(
-            "Item stored",
-            item_id=item_id,
-            tier=tier.name,
-            size=len(data),
-        )
-        
-        return item_id
-    
-    async def retrieve(self, tier: MemoryTier, item_id: str) -> Optional[bytes]:
-        """Retrieve data from a local tier"""
-        if tier not in self._tiers:
-            return None
-        
-        data = await self._tiers[tier].retrieve(item_id)
-        if data:
-            self._metrics["items_retrieved"] += 1
-        return data
-    
-    async def delete(
-        self,
-        tier: MemoryTier,
-        item_id: str,
-        sync_priority: SyncPriority = SyncPriority.NORMAL,
-    ) -> bool:
-        """Delete data from a local tier and propagate deletion"""
-        if tier not in self._tiers:
-            return False
-        
-        result = await self._tiers[tier].delete(item_id)
-        
-        if result:
-            # Create delete sync item
-            sync_item = MemorySyncItem(
-                item_id=uuid4(),
-                timestamp_ns=int(time.time() * 1e9),
-                tier=tier,
-                operation=SyncOperation.DELETE,
-                priority=sync_priority,
-                payload=item_id.encode(),
-                source_node=self.node_id,
-            )
-            await self._sync_manager.store_local(sync_item)
-        
-        return result
-    
-    # ========================================================================
-    # Delta Batch Creation
-    # ========================================================================
-    
-    async def create_delta_batch(
-        self,
-        tier: MemoryTier,
-        target_node: str = "*",
-        priority: SyncPriority = SyncPriority.NORMAL,
-    ) -> MemorySyncBatch:
-        """
-        Create a delta batch for sync to target node(s).
-        
-        Args:
-            tier: Memory tier to sync
-            target_node: Target node or "*" for broadcast
-            priority: Sync priority
-        
-        Returns:
-            MemorySyncBatch with delta items
-        """
-        return await self._sync_manager.create_delta_batch(
-            peer_id=target_node if target_node != "*" else self.hub_node_id,
-            tier=tier,
-            priority=priority,
-        )
-    
-    # ========================================================================
-    # Batch Application
-    # ========================================================================
-    
-    async def apply_sync_batch(
-        self,
-        batch: MemorySyncBatch,
-    ) -> Dict[str, Any]:
-        """
-        Apply an incoming sync batch.
-        
-        Uses MemorySyncManager for conflict resolution.
-        """
-        # Apply through sync manager
-        result = await self._sync_manager.apply_sync_batch(batch)
-        
-        # Also apply to local tier storage
-        if result["success"]:
-            tier = batch.tier
-            if tier in self._tiers:
-                tier_impl = self._tiers[tier]
-                for item in batch.items:
-                    if item.operation == SyncOperation.DELETE:
-                        await tier_impl.delete(str(item.item_id))
-                    else:
-                        payload = item.decompress_payload() if item.is_compressed else item.payload
-                        await tier_impl.store(str(item.item_id), payload, item.metadata)
-        
-        self._metrics["batches_received"] += 1
-        
-        return result
-    
-    # ========================================================================
-    # Sync Operations
-    # ========================================================================
-    
-    async def sync_to_hub(
-        self,
-        tier: MemoryTier,
-        priority: SyncPriority = SyncPriority.NORMAL,
-    ) -> bool:
-        """
-        Sync a tier to the hub.
-        
-        Creates delta batch and sends via hub relay.
-        """
-        batch = await self.create_delta_batch(tier, self.hub_node_id, priority)
-        
-        if not batch.items:
-            logger.debug("No items to sync to hub", tier=tier.name)
-            return True
-        
-        return await self._send_batch(batch, priority.to_memshadow_priority())
-    
-    async def sync_to_peer(
-        self,
-        peer_id: str,
-        tier: MemoryTier,
-        priority: SyncPriority = SyncPriority.NORMAL,
-    ) -> bool:
-        """
-        Sync a tier directly to a P2P peer.
-        
-        Used for CRITICAL/EMERGENCY priority syncs.
-        """
-        if peer_id not in self._peers:
-            logger.warning("Unknown peer", peer_id=peer_id)
-            return False
-        
-        batch = await self.create_delta_batch(tier, peer_id, priority)
-        
-        if not batch.items:
-            return True
-        
-        return await self._send_batch(batch, priority.to_memshadow_priority())
-    
-    async def _send_batch(
-        self,
-        batch: MemorySyncBatch,
-        priority: Priority,
-    ) -> bool:
-        """
-        Send a batch using appropriate routing.
-        
-        Priority routing rules:
-        - CRITICAL/EMERGENCY: Direct P2P + hub notification
-        - HIGH: Hub-relayed with priority
-        - NORMAL/LOW: Standard hub routing
-        """
-        if not self.mesh_send:
-            logger.warning("No mesh callback configured")
-            return False
-        
-        msg = batch.to_memshadow_message()
-        packed = msg.pack()
-        
-        try:
-            if should_route_p2p(priority):
-                # P2P: Send to all peers directly, plus hub notification
-                self._metrics["p2p_syncs"] += 1
-                
-                for peer_id in self._peers:
-                    if peer_id != batch.source_node:
-                        try:
-                            await self.mesh_send(peer_id, packed)
-                        except Exception as e:
-                            logger.warning("P2P send failed", peer=peer_id, error=str(e))
-                
-                # Also notify hub
-                await self.mesh_send(self.hub_node_id, packed)
-            else:
-                # Hub-relayed
-                self._metrics["hub_syncs"] += 1
-                await self.mesh_send(self.hub_node_id, packed)
-            
-            self._metrics["batches_sent"] += 1
-            
-            logger.debug(
-                "Batch sent",
-                batch_id=batch.batch_id,
-                items=len(batch.items),
-                priority=priority.name,
-                p2p=should_route_p2p(priority),
-            )
-            
-            return True
-            
-        except Exception as e:
-            logger.error("Failed to send batch", error=str(e))
-            # Queue for retry
-            self._pending_batches[batch.batch_id] = batch
-            return False
-    
-    # ========================================================================
-    # Improvement Propagation
-    # ========================================================================
-    
-    async def propagate_improvement(
-        self,
-        improvement_type: str,
-        improvement_data: bytes,
-        gain_percent: float,
-        affected_tiers: List[MemoryTier],
-    ) -> bool:
-        """
-        Propagate a self-improvement update via MEMSHADOW.
-        
-        Creates sync items for affected tiers and routes based on gain.
-        """
-        # Determine priority based on gain
-        if gain_percent > 20:
-            priority = SyncPriority.URGENT  # Maps to EMERGENCY
-        elif gain_percent > 10:
-            priority = SyncPriority.HIGH
-        else:
-            priority = SyncPriority.LOW
-        
-        # Create sync items for each affected tier
-        for tier in affected_tiers:
-            if tier not in self._tiers:
-                continue
-            
-            sync_item = MemorySyncItem.create(
-                payload=improvement_data,
-                tier=tier,
-                operation=SyncOperation.MERGE,
-                priority=priority,
-                source_node=self.node_id,
-            )
-            sync_item.metadata = {
-                "improvement_type": improvement_type,
-                "gain_percent": gain_percent,
-            }
-            
-            await self._sync_manager.store_local(sync_item)
-        
-        # Also send improvement announcement
-        if self.mesh_send:
-            from dsmil_protocol import create_improvement_announce
-            
-            msg = create_improvement_announce(
-                improvement_id=str(uuid4()),
-                improvement_type=improvement_type,
-                gain_percent=gain_percent,
-                priority=priority.to_memshadow_priority(),
-            )
-            
-            await self.mesh_send(self.hub_node_id, msg.pack())
-            self._metrics["improvements_propagated"] += 1
-        
-        logger.info(
-            "Improvement propagated",
-            type=improvement_type,
-            gain_percent=gain_percent,
-            priority=priority.name,
-        )
-        
-        return True
-    
-    # ========================================================================
-    # Message Handling
-    # ========================================================================
-    
-    async def handle_incoming_message(
-        self,
-        data: bytes,
-        source_node: str,
-    ) -> Dict[str, Any]:
-        """
-        Handle incoming MEMSHADOW message.
-        
-        Routes to appropriate handler based on message type.
-        """
-        try:
-            header = MemshadowHeader.unpack(data[:HEADER_SIZE])
-            
-            if not header.validate():
-                return {"error": "Invalid header"}
-            
-            if header.msg_type == MessageType.MEMORY_SYNC:
-                msg = MemshadowMessage.unpack(data)
-                batch = MemorySyncBatch.from_memshadow_message(msg)
-                return await self.apply_sync_batch(batch)
-            
-            elif header.msg_type == MessageType.IMPROVEMENT_PAYLOAD:
-                # Apply improvement payload
-                msg = MemshadowMessage.unpack(data)
-                return await self._handle_improvement_payload(msg, source_node)
-            
-            else:
-                logger.debug("Unhandled message type", msg_type=header.msg_type.name)
-                return {"status": "ignored", "msg_type": header.msg_type.name}
-                
-        except Exception as e:
-            logger.error("Failed to handle message", error=str(e))
-            return {"error": str(e)}
-    
-    async def _handle_improvement_payload(
-        self,
-        msg: MemshadowMessage,
-        source_node: str,
-    ) -> Dict[str, Any]:
-        """Handle an improvement payload message"""
-        try:
-            payload = json.loads(msg.payload.decode())
-            improvement_type = payload.get("type", "unknown")
-            
-            logger.info(
-                "Improvement payload received",
-                type=improvement_type,
-                source=source_node,
-            )
-            
-            # ACK the improvement
-            if self.mesh_send:
-                ack_msg = MemshadowMessage.create(
-                    msg_type=MessageType.IMPROVEMENT_ACK,
-                    payload=json.dumps({
-                        "improvement_id": payload.get("improvement_id"),
-                        "status": "applied",
-                    }).encode(),
-                    priority=Priority.HIGH,
-                )
-                await self.mesh_send(source_node, ack_msg.pack())
-            
-            return {"status": "applied", "type": improvement_type}
-            
-        except Exception as e:
-            return {"error": str(e)}
-    
-    # ========================================================================
-    # Stats
-    # ========================================================================
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get adapter statistics"""
+    def to_dict(self) -> Dict:
         return {
+            "query_id": self.query_id,
             "node_id": self.node_id,
-            "registered_tiers": [t.name for t in self._tiers.keys()],
-            "peers": list(self._peers),
-            "pending_batches": len(self._pending_batches),
-            "sync_manager_stats": self._sync_manager.get_stats(),
-            **self._metrics,
+            "success": self.success,
+            "confidence": self.confidence,
+            "response_time_ms": self.response_time_ms,
+            "correlation": {
+                "matches": self.correlation.matches if self.correlation else [],
+                "patterns": self.correlation.patterns if self.correlation else [],
+            } if self.correlation else None,
+            "error": self.error,
         }
 
 
-# ============================================================================
-# Spoke Client
-# ============================================================================
+class LocalCorrelator:
+    """
+    Performs local correlation on node's data
+
+    This is where the actual intelligence analysis happens
+    on each node's local data.
+    """
+
+    def __init__(self, node_id: str):
+        self.node_id = node_id
+        self._local_data: Dict[str, List[Dict]] = {}
+        self._indices: Dict[str, Dict] = {}
+
+    def add_data(self, domain: str, data: List[Dict]):
+        """Add data to local store"""
+        if domain not in self._local_data:
+            self._local_data[domain] = []
+        self._local_data[domain].extend(data)
+        self._build_index(domain)
+
+    def _build_index(self, domain: str):
+        """Build search index for domain"""
+        self._indices[domain] = {}
+        for i, item in enumerate(self._local_data.get(domain, [])):
+            for key, value in item.items():
+                if isinstance(value, str):
+                    key_index = self._indices[domain].setdefault(key, {})
+                    value_lower = value.lower()
+                    if value_lower not in key_index:
+                        key_index[value_lower] = []
+                    key_index[value_lower].append(i)
+
+    def correlate(self, query: Dict) -> LocalCorrelation:
+        """
+        Perform local correlation based on query
+
+        Args:
+            query: Structured query from hub
+
+        Returns:
+            LocalCorrelation result
+        """
+        start_time = time.time()
+
+        correlation_id = hashlib.sha256(
+            f"{self.node_id}:{query.get('query_id', '')}:{time.time()}".encode()
+        ).hexdigest()[:16]
+
+        matches = []
+        relationships = []
+        patterns = []
+
+        # Search keywords in local data
+        keywords = query.get("keywords", [])
+        domains = query.get("domains", set()) or set(self._local_data.keys())
+
+        for domain in domains:
+            if domain not in self._local_data:
+                continue
+
+            domain_data = self._local_data[domain]
+
+            # Search for keyword matches
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+
+                for idx, item in enumerate(domain_data):
+                    for key, value in item.items():
+                        if isinstance(value, str) and keyword_lower in value.lower():
+                            matches.append({
+                                "domain": domain,
+                                "index": idx,
+                                "item": item,
+                                "matched_field": key,
+                                "matched_keyword": keyword,
+                            })
+
+        # Find relationships between matches
+        if len(matches) > 1:
+            for i, m1 in enumerate(matches[:-1]):
+                for m2 in matches[i+1:]:
+                    # Check for common fields
+                    common = set(m1["item"].keys()) & set(m2["item"].keys())
+                    for field in common:
+                        if m1["item"][field] == m2["item"][field]:
+                            relationships.append({
+                                "type": "shared_value",
+                                "field": field,
+                                "value": m1["item"][field],
+                                "items": [m1["index"], m2["index"]],
+                            })
+
+        # Detect patterns
+        if matches:
+            # Simple pattern: repeated values
+            value_counts = {}
+            for match in matches:
+                for key, value in match["item"].items():
+                    if isinstance(value, str):
+                        value_counts[(key, value)] = value_counts.get((key, value), 0) + 1
+
+            for (key, value), count in value_counts.items():
+                if count >= 2:
+                    patterns.append({
+                        "type": "repeated_value",
+                        "field": key,
+                        "value": value,
+                        "count": count,
+                    })
+
+        processing_time = (time.time() - start_time) * 1000
+
+        # Calculate confidence based on evidence
+        confidence = min(0.95, 0.3 + (len(matches) * 0.05) + (len(relationships) * 0.1))
+
+        return LocalCorrelation(
+            correlation_id=correlation_id,
+            query_id=query.get("query_id", ""),
+            matches=matches,
+            relationships=relationships,
+            patterns=patterns,
+            confidence=confidence,
+            evidence_count=len(matches),
+            processing_time_ms=processing_time,
+        )
+
 
 class SpokeClient:
     """
-    Node client for the DSMIL Brain Federation.
-    
-    Integrates SpokeMemoryAdapter for memory tier access and sync.
+    Spoke Node Client
+
+    A node in the distributed brain network that:
+    - Receives queries from the hub (no local NL interface)
+    - Performs local correlation and analysis
+    - Returns results to hub
+    - Can operate autonomously or with peers when hub offline
+
+    Usage:
+        spoke = SpokeClient(node_id="node-001", hub_endpoint="hub.local:8000")
+
+        # Connect to hub
+        await spoke.connect()
+
+        # Process incoming query (called by hub)
+        response = await spoke.process_query(query)
+
+        # Start autonomous mode if hub offline
+        spoke.enter_autonomous_mode()
     """
-    
-    def __init__(
-        self,
-        node_id: str,
-        hub_endpoint: str,
-        capabilities: Optional[Set[str]] = None,
-        data_domains: Optional[Set[str]] = None,
-        mesh_port: int = 8889,
-        use_mesh: bool = True,
-        sync_config: Optional[SyncConfig] = None,
-    ):
+
+    def __init__(self, node_id: str, hub_endpoint: str = "",
+                 capabilities: Optional[Set[str]] = None,
+                 data_domains: Optional[Set[str]] = None,
+                 mesh_port: int = 8889,
+                 use_mesh: bool = True):
+        """
+        Initialize spoke client
+
+        Args:
+            node_id: Unique identifier for this node
+            hub_endpoint: Network endpoint of hub (legacy, use mesh instead)
+            capabilities: Node capabilities
+            data_domains: Data domains this node has
+            mesh_port: Port for mesh network
+            use_mesh: Whether to use dsmil-mesh for communication
+        """
         self.node_id = node_id
         self.hub_endpoint = hub_endpoint
         self.capabilities = capabilities or {"search", "correlate"}
         self.data_domains = data_domains or set()
         self.mesh_port = mesh_port
-        self.use_mesh = use_mesh
-        
-        # Connection state
-        self._connected = False
-        self._hub_node_id = "hub"  # Will be updated on connect
-        
-        # Mesh send callback
-        self._mesh_send: Optional[Callable] = None
-        
-        # Memory adapter
-        self._memory_adapter = SpokeMemoryAdapter(
-            node_id=node_id,
-            hub_node_id=self._hub_node_id,
-            mesh_send_callback=self._mesh_send_wrapper,
-            config=sync_config,
-        )
-        
-        # Message handlers
-        self._handlers: Dict[MessageType, Callable] = {}
-        self._setup_handlers()
-        
-        # Stats
-        self._stats = {
+        self.use_mesh = use_mesh and MESH_AVAILABLE
+
+        # State
+        self.state = SpokeState.INITIALIZING
+
+        # Local correlator
+        self._correlator = LocalCorrelator(node_id)
+
+        # Hub connection
+        self._hub_connected = False
+        self._last_hub_contact: Optional[datetime] = None
+
+        # Peer connections
+        self._peers: Dict[str, Dict] = {}
+
+        # Offline queue (queries/intel to sync when reconnected)
+        self._offline_queue: List[Dict] = []
+
+        # Mesh network
+        self._mesh: Optional[QuantumMesh] = None
+        if self.use_mesh:
+            self._init_mesh()
+
+        # Heartbeat
+        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._running = False
+        self._heartbeat_interval = 5.0  # seconds
+
+        # Callbacks
+        self.on_state_change: Optional[Callable[[SpokeState], None]] = None
+        self.on_hub_reconnect: Optional[Callable[[], None]] = None
+
+        # Statistics
+        self.stats = {
             "queries_processed": 0,
-            "improvements_announced": 0,
-            "improvements_received": 0,
+            "correlations_performed": 0,
+            "intel_received": 0,
+            "autonomous_operations": 0,
+            "mesh_enabled": self.use_mesh,
         }
-        
-        logger.info("SpokeClient initialized", node_id=node_id, hub=hub_endpoint)
-    
-    def _setup_handlers(self):
-        """Register message handlers"""
-        self._handlers[MessageType.QUERY_DISTRIBUTE] = self._handle_query
-        self._handlers[MessageType.MEMORY_SYNC] = self._handle_memory_sync
-        self._handlers[MessageType.IMPROVEMENT_ANNOUNCE] = self._handle_improvement_announce
-        self._handlers[MessageType.IMPROVEMENT_PAYLOAD] = self._handle_improvement_payload
-        self._handlers[MessageType.INTEL_PROPAGATE] = self._handle_intel
-    
-    async def _mesh_send_wrapper(self, peer_id: str, data: bytes):
-        """Wrapper for mesh send"""
-        if self._mesh_send:
-            await self._mesh_send(peer_id, data)
-    
-    def set_mesh_callback(self, callback: Callable):
-        """Set the mesh send callback"""
-        self._mesh_send = callback
-        self._memory_adapter.mesh_send = self._mesh_send_wrapper
-    
-    @property
-    def memory_adapter(self) -> SpokeMemoryAdapter:
-        """Access the memory adapter"""
-        return self._memory_adapter
-    
-    # ========================================================================
-    # Connection
-    # ========================================================================
-    
+
+        logger.info(f"SpokeClient initialized: {node_id} (mesh={'enabled' if self.use_mesh else 'disabled'})")
+
+    def _init_mesh(self):
+        """Initialize mesh network"""
+        if not MESH_AVAILABLE:
+            logger.warning("Cannot initialize mesh - dsmil-mesh not available")
+            return
+
+        try:
+            self._mesh = QuantumMesh(
+                node_id=self.node_id,
+                port=self.mesh_port,
+                config=MeshConfig(
+                    node_id=self.node_id,
+                    port=self.mesh_port,
+                    cluster_name="dsmil-brain",
+                )
+            )
+
+            # Register message handlers
+            self._mesh.on_message(MessageTypes.BRAIN_QUERY, self._handle_mesh_query)
+            self._mesh.on_message(MessageTypes.KNOWLEDGE_UPDATE, self._handle_mesh_intel)
+            self._mesh.on_message(MessageTypes.VECTOR_SYNC, self._handle_mesh_sync)
+
+            # P2P improvement handlers
+            self._mesh.on_message(MessageTypes.IMPROVEMENT_ANNOUNCE, self._handle_improvement_announce)
+            self._mesh.on_message(MessageTypes.IMPROVEMENT_REQUEST, self._handle_improvement_request)
+            self._mesh.on_message(MessageTypes.IMPROVEMENT_PAYLOAD, self._handle_improvement_payload)
+            self._mesh.on_message(MessageTypes.IMPROVEMENT_ACK, self._handle_improvement_ack)
+            self._mesh.on_message(MessageTypes.IMPROVEMENT_METRICS, self._handle_improvement_metrics)
+
+            # SHRINK psychological intel handlers
+            self._mesh.on_message(MessageTypes.PSYCH_ASSESSMENT, self._handle_psych_intel)
+            self._mesh.on_message(MessageTypes.DARK_TRIAD_UPDATE, self._handle_psych_intel)
+            self._mesh.on_message(MessageTypes.RISK_UPDATE, self._handle_psych_intel)
+            self._mesh.on_message(MessageTypes.PSYCH_THREAT_ALERT, self._handle_psych_threat)
+
+            logger.info(f"Mesh network initialized on port {self.mesh_port}")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize mesh: {e}")
+            self._mesh = None
+            self.use_mesh = False
+
+    def _handle_mesh_query(self, data: bytes, peer_id: str):
+        """Handle incoming query from mesh (from hub)"""
+        try:
+            query_data = json.loads(data.decode())
+            logger.info(f"Received query from hub via mesh: {query_data.get('query_id', 'unknown')}")
+
+            # Process query asynchronously
+            asyncio.create_task(self._process_mesh_query(query_data, peer_id))
+
+        except Exception as e:
+            logger.error(f"Error handling mesh query: {e}")
+
+    async def _process_mesh_query(self, query_data: Dict, source_peer: str):
+        """Process a query received via mesh"""
+        start_time = time.time()
+
+        try:
+            # Perform local correlation
+            correlation = self._correlator.correlate(query_data)
+
+            # Build response
+            response = QueryResponse(
+                query_id=query_data.get("query_id", ""),
+                node_id=self.node_id,
+                success=True,
+                correlation=correlation,
+                confidence=correlation.confidence,
+                response_time_ms=(time.time() - start_time) * 1000,
+            )
+
+            # Send response back via mesh
+            if self._mesh:
+                response_msg = json.dumps({
+                    "query_id": response.query_id,
+                    "node_id": response.node_id,
+                    "success": response.success,
+                    "result": response.to_dict(),
+                    "confidence": response.confidence,
+                    "response_time_ms": response.response_time_ms,
+                }).encode()
+
+                self._mesh.send(source_peer, MessageTypes.QUERY_RESPONSE, response_msg)
+
+            self.stats["queries_processed"] += 1
+            self.stats["correlations_performed"] += 1
+
+        except Exception as e:
+            logger.error(f"Error processing mesh query: {e}")
+
+            # Send error response
+            if self._mesh:
+                error_msg = json.dumps({
+                    "query_id": query_data.get("query_id", ""),
+                    "node_id": self.node_id,
+                    "success": False,
+                    "error": str(e),
+                }).encode()
+                self._mesh.send(source_peer, MessageTypes.QUERY_RESPONSE, error_msg)
+
+    def _handle_mesh_intel(self, data: bytes, peer_id: str):
+        """Handle intel update from hub via mesh"""
+        try:
+            intel_data = json.loads(data.decode())
+            logger.info(f"Received intel update from {peer_id}")
+
+            # Store intel locally
+            report = intel_data.get("report", {})
+            # Would update local knowledge base here
+
+            self.stats["intel_received"] += 1
+            self._last_hub_contact = datetime.now(timezone.utc)
+
+        except Exception as e:
+            logger.error(f"Error handling mesh intel: {e}")
+
+    def _handle_mesh_sync(self, data: bytes, peer_id: str):
+        """Handle vector sync from mesh"""
+        try:
+            sync_data = json.loads(data.decode())
+            logger.info(f"Received sync request from {peer_id}")
+            # Handle vector synchronization
+        except Exception as e:
+            logger.error(f"Error handling mesh sync: {e}")
+
+    def _handle_improvement_announce(self, data: bytes, peer_id: str):
+        """
+        Handle improvement announcement from peer (P2P)
+
+        Evaluates if improvement is compatible and wanted, then requests it.
+        """
+        try:
+            if IMPROVEMENT_AVAILABLE:
+                announcement = ImprovementAnnouncement.unpack(data)
+                logger.info(f"Improvement announced by peer {peer_id}: {announcement.improvement_id} "
+                           f"({announcement.improvement_percentage:.1f}% improvement)")
+
+                # Store for potential request
+                self._pending_improvements = getattr(self, '_pending_improvements', {})
+                self._pending_improvements[announcement.improvement_id] = {
+                    "announcement": announcement,
+                    "source_peer": peer_id,
+                    "timestamp": datetime.now(timezone.utc),
+                }
+
+                # Auto-request if significant improvement and compatible
+                if announcement.improvement_percentage >= 10.0:  # 10%+ improvement
+                    self._request_improvement(announcement.improvement_id, peer_id)
+            else:
+                announcement = json.loads(data.decode())
+                logger.info(f"Improvement announced by peer {peer_id}: {announcement}")
+
+        except Exception as e:
+            logger.error(f"Error handling improvement announce from {peer_id}: {e}")
+
+    def _handle_improvement_request(self, data: bytes, peer_id: str):
+        """Handle request for improvement we announced"""
+        try:
+            request = json.loads(data.decode())
+            improvement_id = request.get("improvement_id")
+
+            # If we have this improvement, send it
+            local_improvements = getattr(self, '_local_improvements', {})
+            if improvement_id in local_improvements:
+                package = local_improvements[improvement_id]
+                if self._mesh:
+                    self._mesh.send(peer_id, MessageTypes.IMPROVEMENT_PAYLOAD, package.pack())
+                    logger.info(f"Sent improvement {improvement_id} to {peer_id}")
+
+        except Exception as e:
+            logger.error(f"Error handling improvement request from {peer_id}: {e}")
+
+    def _handle_improvement_payload(self, data: bytes, peer_id: str):
+        """Handle improvement payload (actual data)"""
+        try:
+            if IMPROVEMENT_AVAILABLE:
+                package = ImprovementPackage.unpack(data)
+                logger.info(f"Received improvement payload from {peer_id}: {package.improvement_id}")
+
+                # Apply improvement
+                success = self._apply_improvement(package)
+
+                # Send ACK
+                if self._mesh:
+                    ack = ImprovementAck(
+                        improvement_id=package.improvement_id,
+                        success=success,
+                        applied_at=datetime.now(timezone.utc),
+                        new_metrics=self._get_current_metrics() if success else None,
+                    )
+                    self._mesh.send(peer_id, MessageTypes.IMPROVEMENT_ACK, ack.pack())
+
+        except Exception as e:
+            logger.error(f"Error handling improvement payload from {peer_id}: {e}")
+
+    def _handle_improvement_ack(self, data: bytes, peer_id: str):
+        """Handle acknowledgment from peer that applied our improvement"""
+        try:
+            if IMPROVEMENT_AVAILABLE:
+                ack = ImprovementAck.unpack(data)
+                logger.info(f"Improvement ACK from {peer_id}: {ack.improvement_id} (success={ack.success})")
+
+                # Track adoption
+                self._improvement_adoptions = getattr(self, '_improvement_adoptions', {})
+                self._improvement_adoptions[ack.improvement_id] = \
+                    self._improvement_adoptions.get(ack.improvement_id, 0) + (1 if ack.success else 0)
+
+        except Exception as e:
+            logger.error(f"Error handling improvement ack from {peer_id}: {e}")
+
+    def _handle_improvement_metrics(self, data: bytes, peer_id: str):
+        """Handle performance metrics share from peer"""
+        try:
+            metrics = json.loads(data.decode())
+            logger.debug(f"Metrics from peer {peer_id}: {metrics.get('improvement_id', 'unknown')}")
+        except Exception as e:
+            logger.error(f"Error handling improvement metrics from {peer_id}: {e}")
+
+    def _handle_psych_intel(self, data: bytes, peer_id: str):
+        """Handle psychological intelligence from network"""
+        try:
+            psych_data = json.loads(data.decode())
+            logger.debug(f"Received psych intel from {peer_id}")
+
+            # Store in local knowledge base
+            self._correlator.add_data("psych_intel", [psych_data])
+            self.stats["intel_received"] += 1
+
+        except Exception as e:
+            logger.error(f"Error handling psych intel from {peer_id}: {e}")
+
+    def _handle_psych_threat(self, data: bytes, peer_id: str):
+        """Handle psychological threat alert (high priority)"""
+        try:
+            threat_data = json.loads(data.decode())
+            logger.warning(f"PSYCH THREAT from {peer_id}: {threat_data.get('threat_type', 'unknown')}")
+
+            # Store as high-priority intel
+            threat_data["_priority"] = "CRITICAL"
+            self._correlator.add_data("psych_threats", [threat_data])
+
+        except Exception as e:
+            logger.error(f"Error handling psych threat from {peer_id}: {e}")
+
+    def _request_improvement(self, improvement_id: str, peer_id: str):
+        """Request an improvement from a peer"""
+        if self._mesh:
+            request = json.dumps({"improvement_id": improvement_id}).encode()
+            self._mesh.send(peer_id, MessageTypes.IMPROVEMENT_REQUEST, request)
+            logger.info(f"Requested improvement {improvement_id} from {peer_id}")
+
+    def _apply_improvement(self, package: 'ImprovementPackage') -> bool:
+        """Apply an improvement package locally"""
+        try:
+            # TODO: Implement actual improvement application
+            # This would update model weights, config values, or learned patterns
+            logger.info(f"Applied improvement {package.improvement_id} ({package.improvement_type.name})")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to apply improvement: {e}")
+            return False
+
+    def _get_current_metrics(self) -> Dict:
+        """Get current performance metrics"""
+        return {
+            "queries_processed": self.stats.get("queries_processed", 0),
+            "correlations_performed": self.stats.get("correlations_performed", 0),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def announce_improvement(self, improvement: 'ImprovementPackage'):
+        """
+        Announce a local improvement to all peers (P2P broadcast)
+
+        Called when local improvement tracker detects significant improvement.
+        """
+        if not IMPROVEMENT_AVAILABLE:
+            return
+
+        # Store locally
+        self._local_improvements = getattr(self, '_local_improvements', {})
+        self._local_improvements[improvement.improvement_id] = improvement
+
+        # Create announcement
+        announcement = ImprovementAnnouncement(
+            improvement_id=improvement.improvement_id,
+            improvement_type=improvement.improvement_type,
+            improvement_percentage=improvement.improvement_percentage,
+            compatibility_level=improvement.compatibility_level,
+            size_bytes=len(improvement.pack()),
+            source_node=self.node_id,
+        )
+
+        # Broadcast to all peers
+        if self._mesh:
+            for peer_id in self._peers:
+                try:
+                    self._mesh.send(peer_id, MessageTypes.IMPROVEMENT_ANNOUNCE, announcement.pack())
+                except:
+                    pass
+
+            logger.info(f"Announced improvement {improvement.improvement_id} to {len(self._peers)} peers")
+
+    def start_mesh(self):
+        """Start the mesh network"""
+        if self._mesh:
+            self._mesh.start()
+            self._hub_connected = True
+            self._set_state(SpokeState.CONNECTED)
+            logger.info("Mesh network started")
+
+    def stop_mesh(self):
+        """Stop the mesh network"""
+        if self._mesh:
+            self._mesh.stop()
+            self._hub_connected = False
+            logger.info("Mesh network stopped")
+
+    def _set_state(self, new_state: SpokeState):
+        """Update state and trigger callback"""
+        old_state = self.state
+        self.state = new_state
+
+        if self.on_state_change:
+            self.on_state_change(new_state)
+
+        logger.info(f"State change: {old_state.name} -> {new_state.name}")
+
     async def connect(self) -> bool:
         """
-        Connect to the hub.
-        
-        Sends registration message with capabilities and memory tier info.
+        Connect to the central hub via mesh network
+
+        Returns:
+            True if connected successfully
         """
         try:
-            # Create registration message
-            reg_data = {
-                "node_id": self.node_id,
-                "endpoint": f"localhost:{self.mesh_port}",
-                "capabilities": list(self.capabilities),
-                "data_domains": list(self.data_domains),
-                "memory_capabilities": {
-                    "supports_l1": True,
-                    "supports_l2": True,
-                    "supports_l3": True,
-                    "max_batch_size": 100,
-                    "compression_supported": True,
-                },
-            }
-            
-            msg = MemshadowMessage.create(
-                msg_type=MessageType.NODE_REGISTER,
-                payload=json.dumps(reg_data).encode(),
-                priority=Priority.HIGH,
-            )
-            
-            if self._mesh_send:
-                await self._mesh_send(self._hub_node_id, msg.pack())
-            
-            self._connected = True
-            
-            logger.info("Connected to hub", hub=self.hub_endpoint)
-            return True
-            
-        except Exception as e:
-            logger.error("Failed to connect to hub", error=str(e))
-            return False
-    
-    async def disconnect(self):
-        """Disconnect from hub"""
-        if self._mesh_send:
-            msg = MemshadowMessage.create(
-                msg_type=MessageType.NODE_DEREGISTER,
-                payload=json.dumps({"node_id": self.node_id}).encode(),
-            )
-            await self._mesh_send(self._hub_node_id, msg.pack())
-        
-        self._connected = False
-        logger.info("Disconnected from hub")
-    
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
-    
-    # ========================================================================
-    # Query Processing
-    # ========================================================================
-    
-    async def process_query(
-        self,
-        query: Dict[str, Any],
-        source: QuerySource,
-    ) -> QueryResponse:
-        """
-        Process an incoming query.
-        
-        Performs local correlation and analysis.
-        """
-        start_time = time.time()
-        query_id = query.get("query_id", str(uuid4()))
-        query_text = query.get("query_text", "")
-        
-        # Placeholder: real implementation would perform actual analysis
-        results = [{
-            "match": "example",
-            "score": 0.85,
-            "source": self.node_id,
-        }]
-        
-        self._stats["queries_processed"] += 1
-        
-        return QueryResponse(
-            query_id=query_id,
-            results=results,
-            confidence=0.85,
-            processing_time_ms=(time.time() - start_time) * 1000,
-            source=source,
-        )
-    
-    # ========================================================================
-    # Improvement Propagation
-    # ========================================================================
-    
-    async def announce_improvement(
-        self,
-        improvement_type: str,
-        improvement_data: bytes,
-        gain_percent: float,
-    ):
-        """
-        Broadcast a local improvement to the network.
-        
-        Routes based on gain_percent:
-        - >20%: CRITICAL (P2P + hub)
-        - 10-20%: HIGH (hub relay)
-        - <10%: LOW (background)
-        """
-        # Use memory adapter for propagation
-        await self._memory_adapter.propagate_improvement(
-            improvement_type=improvement_type,
-            improvement_data=improvement_data,
-            gain_percent=gain_percent,
-            affected_tiers=[MemoryTier.WORKING, MemoryTier.EPISODIC],
-        )
-        
-        self._stats["improvements_announced"] += 1
-    
-    # ========================================================================
-    # Message Handlers
-    # ========================================================================
-    
-    async def _handle_query(self, data: bytes, peer_id: str):
-        """Handle query from hub"""
-        try:
-            msg = MemshadowMessage.unpack(data)
-            query = json.loads(msg.payload.decode())
-            
-            response = await self.process_query(query, QuerySource.HUB)
-            
-            # Send response
-            if self._mesh_send:
-                resp_msg = MemshadowMessage.create(
-                    msg_type=MessageType.QUERY_RESPONSE,
-                    payload=json.dumps({
-                        "query_id": response.query_id,
-                        "results": response.results,
-                        "confidence": response.confidence,
-                        "node_id": self.node_id,
-                    }).encode(),
-                    priority=Priority.NORMAL,
-                )
-                await self._mesh_send(peer_id, resp_msg.pack())
-                
-        except Exception as e:
-            logger.error("Failed to handle query", error=str(e))
-    
-    async def _handle_memory_sync(self, data: bytes, peer_id: str):
-        """Handle memory sync message"""
-        await self._memory_adapter.handle_incoming_message(data, peer_id)
-    
-    async def _handle_improvement_announce(self, data: bytes, peer_id: str):
-        """Handle improvement announcement"""
-        try:
-            msg = MemshadowMessage.unpack(data)
-            announcement = json.loads(msg.payload.decode())
-            
-            improvement_id = announcement.get("improvement_id")
-            improvement_type = announcement.get("type")
-            gain = announcement.get("gain_percent", 0)
-            
-            # Decide if we want this improvement
-            if gain >= 5:  # Threshold for requesting
-                # Request the improvement
-                if self._mesh_send:
-                    req_msg = MemshadowMessage.create(
-                        msg_type=MessageType.IMPROVEMENT_REQUEST,
-                        payload=json.dumps({
-                            "improvement_id": improvement_id,
-                            "requester": self.node_id,
-                        }).encode(),
-                        priority=Priority.HIGH,
-                    )
-                    await self._mesh_send(peer_id, req_msg.pack())
-            
-            logger.info(
-                "Improvement announced",
-                type=improvement_type,
-                gain_percent=gain,
-                source=peer_id,
-            )
-            
-        except Exception as e:
-            logger.error("Failed to handle improvement announce", error=str(e))
-    
-    async def _handle_improvement_payload(self, data: bytes, peer_id: str):
-        """Handle improvement payload"""
-        result = await self._memory_adapter.handle_incoming_message(data, peer_id)
-        if result.get("status") == "applied":
-            self._stats["improvements_received"] += 1
-    
-    async def _handle_intel(self, data: bytes, peer_id: str):
-        """Handle intel propagation"""
-        try:
-            msg = MemshadowMessage.unpack(data)
-            intel = json.loads(msg.payload.decode())
-            
-            logger.info("Intel received", type=intel.get("type"), source=peer_id)
-            
-        except Exception as e:
-            logger.error("Failed to handle intel", error=str(e))
-    
-    # ========================================================================
-    # Dispatch
-    # ========================================================================
-    
-    async def dispatch_message(self, data: bytes, peer_id: str) -> bool:
-        """Dispatch incoming message to appropriate handler"""
-        try:
-            header = MemshadowHeader.unpack(data[:HEADER_SIZE])
-            
-            if not header.validate():
-                logger.warning("Invalid header", peer=peer_id)
-                return False
-            
-            handler = self._handlers.get(header.msg_type)
-            if handler:
-                await handler(data, peer_id)
+            # Use mesh network if available
+            if self._mesh and self.use_mesh:
+                self._mesh.start()
+                self._hub_connected = True
+                self._last_hub_contact = datetime.now(timezone.utc)
+                self._set_state(SpokeState.CONNECTED)
+
+                # Start heartbeat
+                self._start_heartbeat()
+
+                # Sync offline queue if any
+                if self._offline_queue:
+                    await self._sync_offline_queue()
+
+                logger.info(f"Connected to hub via mesh network")
                 return True
             else:
-                logger.debug("No handler", msg_type=header.msg_type.name)
-                return False
-                
+                # Legacy endpoint connection (simulated)
+                self._hub_connected = True
+                self._last_hub_contact = datetime.now(timezone.utc)
+                self._set_state(SpokeState.CONNECTED)
+
+                # Start heartbeat
+                self._start_heartbeat()
+
+                # Sync offline queue if any
+                if self._offline_queue:
+                    await self._sync_offline_queue()
+
+                logger.info(f"Connected to hub at {self.hub_endpoint} (simulated)")
+                return True
+
         except Exception as e:
-            logger.error("Dispatch error", error=str(e))
+            logger.error(f"Failed to connect to hub: {e}")
+            self._hub_connected = False
+            self._set_state(SpokeState.DISCONNECTED)
             return False
-    
-    # ========================================================================
-    # Stats
-    # ========================================================================
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get client statistics"""
+
+    async def disconnect(self):
+        """Disconnect from hub"""
+        self._hub_connected = False
+        self._stop_heartbeat()
+        self._set_state(SpokeState.DISCONNECTED)
+        logger.info("Disconnected from hub")
+
+    async def process_query(self, query: Dict, source: QuerySource = QuerySource.HUB) -> QueryResponse:
+        """
+        Process an incoming query
+
+        Args:
+            query: Structured query from hub or peer
+            source: Source of the query
+
+        Returns:
+            QueryResponse with results
+        """
+        start_time = time.time()
+
+        # Validate source - we don't accept user queries
+        if source not in (QuerySource.HUB, QuerySource.PEER, QuerySource.INTERNAL):
+            return QueryResponse(
+                query_id=query.get("query_id", ""),
+                node_id=self.node_id,
+                success=False,
+                error="Invalid query source",
+            )
+
+        try:
+            # Perform local correlation
+            correlation = self._correlator.correlate(query)
+
+            response_time = (time.time() - start_time) * 1000
+
+            self.stats["queries_processed"] += 1
+            self.stats["correlations_performed"] += 1
+
+            return QueryResponse(
+                query_id=query.get("query_id", ""),
+                node_id=self.node_id,
+                success=True,
+                correlation=correlation,
+                confidence=correlation.confidence,
+                response_time_ms=response_time,
+                data_sources=list(self.data_domains),
+            )
+
+        except Exception as e:
+            logger.error(f"Query processing error: {e}")
+            return QueryResponse(
+                query_id=query.get("query_id", ""),
+                node_id=self.node_id,
+                success=False,
+                error=str(e),
+                response_time_ms=(time.time() - start_time) * 1000,
+            )
+
+    async def receive_intel(self, intel_report: Dict) -> bool:
+        """
+        Receive intelligence from hub
+
+        Args:
+            intel_report: Intelligence report to ingest
+
+        Returns:
+            True if processed successfully
+        """
+        try:
+            # Add to local data
+            domain = intel_report.get("domain", "threat_intel")
+            data = intel_report.get("data", intel_report)
+
+            self._correlator.add_data(domain, [data])
+            self.stats["intel_received"] += 1
+
+            logger.debug(f"Received intel: {intel_report.get('type', 'unknown')}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Intel processing error: {e}")
+            return False
+
+    def add_local_data(self, domain: str, data: List[Dict]):
+        """Add data to local storage for correlation"""
+        self._correlator.add_data(domain, data)
+        if domain not in self.data_domains:
+            self.data_domains.add(domain)
+
+    def enter_autonomous_mode(self):
+        """
+        Enter autonomous operation mode
+
+        Called when hub is unreachable and node needs to
+        operate independently.
+        """
+        self._set_state(SpokeState.AUTONOMOUS)
+        self.stats["autonomous_operations"] += 1
+        logger.warning("Entered autonomous mode - hub unreachable")
+
+    def enter_peer_mode(self, peers: List[Dict]):
+        """
+        Enter peer coordination mode
+
+        Args:
+            peers: List of peer nodes to coordinate with
+        """
+        for peer in peers:
+            self._peers[peer["node_id"]] = peer
+
+        self._set_state(SpokeState.PEER_MODE)
+        logger.info(f"Entered peer mode with {len(peers)} peers")
+
+    async def query_peers(self, query: Dict) -> List[QueryResponse]:
+        """
+        Query peer nodes when in peer mode
+
+        Args:
+            query: Query to send to peers
+
+        Returns:
+            List of responses from peers
+        """
+        if self.state != SpokeState.PEER_MODE:
+            return []
+
+        responses = []
+        for peer_id, peer_info in self._peers.items():
+            try:
+                # Would do actual network call here
+                # For now, simulate
+                responses.append(QueryResponse(
+                    query_id=query.get("query_id", ""),
+                    node_id=peer_id,
+                    success=True,
+                    confidence=0.5,
+                ))
+            except Exception as e:
+                logger.error(f"Peer query failed for {peer_id}: {e}")
+
+        return responses
+
+    async def _sync_offline_queue(self):
+        """Sync queued items when reconnecting to hub"""
+        if not self._offline_queue:
+            return
+
+        self._set_state(SpokeState.SYNCING)
+
+        logger.info(f"Syncing {len(self._offline_queue)} queued items")
+
+        synced = []
+        for item in self._offline_queue:
+            try:
+                # Would send to hub here
+                synced.append(item)
+            except Exception as e:
+                logger.error(f"Sync failed for item: {e}")
+
+        # Remove synced items
+        for item in synced:
+            self._offline_queue.remove(item)
+
+        self._set_state(SpokeState.CONNECTED)
+
+    def _start_heartbeat(self):
+        """Start heartbeat thread"""
+        if self._running:
+            return
+
+        self._running = True
+
+        def heartbeat_loop():
+            while self._running:
+                try:
+                    self._send_heartbeat()
+                except Exception as e:
+                    logger.error(f"Heartbeat error: {e}")
+                    self._check_hub_status()
+
+                time.sleep(self._heartbeat_interval)
+
+        self._heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self):
+        """Stop heartbeat thread"""
+        self._running = False
+        if self._heartbeat_thread:
+            self._heartbeat_thread.join(timeout=5.0)
+
+    def _send_heartbeat(self):
+        """Send heartbeat to hub"""
+        if not self._hub_connected:
+            return
+
+        # Would do actual network call here
+        # Update last contact time on success
+        self._last_hub_contact = datetime.now(timezone.utc)
+
+    def _check_hub_status(self):
+        """Check if hub is still reachable"""
+        if self._last_hub_contact:
+            elapsed = (datetime.now(timezone.utc) - self._last_hub_contact).total_seconds()
+
+            if elapsed > 30:  # 30 seconds without contact
+                self._hub_connected = False
+
+                if self.state == SpokeState.CONNECTED:
+                    # Enter autonomous or peer mode
+                    if self._peers:
+                        self.enter_peer_mode(list(self._peers.values()))
+                    else:
+                        self.enter_autonomous_mode()
+
+    def get_status(self) -> Dict:
+        """Get current status"""
         return {
             "node_id": self.node_id,
-            "connected": self._connected,
-            "hub_endpoint": self.hub_endpoint,
+            "state": self.state.name,
+            "hub_connected": self._hub_connected,
+            "last_hub_contact": self._last_hub_contact.isoformat() if self._last_hub_contact else None,
             "capabilities": list(self.capabilities),
-            "memory_adapter": self._memory_adapter.get_stats(),
-            **self._stats,
+            "data_domains": list(self.data_domains),
+            "peer_count": len(self._peers),
+            "offline_queue_size": len(self._offline_queue),
+            "stats": self.stats,
+        }
+
+    def get_capabilities_report(self) -> Dict:
+        """Get capabilities for registration with hub"""
+        return {
+            "node_id": self.node_id,
+            "capabilities": list(self.capabilities),
+            "data_domains": list(self.data_domains),
+            "has_gpu": False,  # Would detect
+            "has_tpm": False,  # Would detect
         }
 
 
-# ============================================================================
-# Module exports
-# ============================================================================
+if __name__ == "__main__":
+    print("Spoke Client Self-Test")
+    print("=" * 50)
 
-__all__ = [
-    "QuerySource",
-    "QueryResponse",
-    "LocalTierInterface",
-    "InMemoryTier",
-    "SpokeMemoryAdapter",
-    "SpokeClient",
-]
+    import asyncio
+
+    spoke = SpokeClient(
+        node_id="test-spoke-001",
+        hub_endpoint="localhost:8000",
+        capabilities={"search", "correlate", "analyze"},
+        data_domains={"threat_intel", "network_logs"},
+    )
+
+    print(f"\n[1] Add Local Data")
+    spoke.add_local_data("threat_intel", [
+        {"ioc": "192.168.1.100", "type": "ip", "threat": "malware"},
+        {"ioc": "evil.com", "type": "domain", "threat": "c2"},
+        {"ioc": "192.168.1.100", "type": "ip", "threat": "botnet"},
+    ])
+    spoke.add_local_data("network_logs", [
+        {"src": "10.0.0.1", "dst": "192.168.1.100", "action": "blocked"},
+        {"src": "10.0.0.2", "dst": "evil.com", "action": "allowed"},
+    ])
+    print(f"    Added data to 2 domains")
+
+    print(f"\n[2] Process Query")
+    async def test_query():
+        response = await spoke.process_query({
+            "query_id": "test-001",
+            "keywords": ["192.168.1.100", "malware"],
+            "domains": {"threat_intel", "network_logs"},
+        })
+        return response
+
+    response = asyncio.run(test_query())
+    print(f"    Success: {response.success}")
+    print(f"    Confidence: {response.confidence:.2f}")
+    if response.correlation:
+        print(f"    Matches: {len(response.correlation.matches)}")
+        print(f"    Patterns: {len(response.correlation.patterns)}")
+        print(f"    Relationships: {len(response.correlation.relationships)}")
+
+    print(f"\n[3] Receive Intel")
+    asyncio.run(spoke.receive_intel({
+        "type": "threat_indicator",
+        "ioc": "newbad.com",
+        "threat": "phishing",
+    }))
+
+    print(f"\n[4] Autonomous Mode")
+    spoke.enter_autonomous_mode()
+    print(f"    State: {spoke.state.name}")
+
+    print(f"\n[5] Status")
+    status = spoke.get_status()
+    for key, value in status.items():
+        print(f"    {key}: {value}")
+
+    print("\n" + "=" * 50)
+    print("Spoke Client test complete")
+

@@ -1,308 +1,350 @@
+#!/usr/bin/env python3
 """
-Improvement Tracker
+Self-Improvement Tracker for DSMIL Brain Federation
 
-Tracks local performance metrics and detects statistically significant improvements.
+Tracks local performance metrics, detects statistically significant improvements,
+and packages improvements for propagation across the mesh network.
 
-Based on: HUB_DOCS/DSMIL Brain Federation.md
+Uses hybrid propagation: critical updates go direct P2P, normal updates via hub.
 """
 
-import statistics
 import time
-from collections import defaultdict, deque
+import threading
+import logging
+import hashlib
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
-from uuid import uuid4
-
-import structlog
+from typing import Dict, List, Optional, Callable, Any
+from datetime import datetime, timezone, timedelta
+from collections import deque
+from statistics import mean, stdev
+import json
 
 from .improvement_types import (
-    ImprovementPackage,
-    ImprovementType,
-    ImprovementPriority,
-    ImprovementMetrics,
+    ImprovementPackage, ImprovementType, ImprovementPriority,
+    CompatibilityLevel, PerformanceMetrics, ModelWeightDelta,
+    ConfigTuning, LearnedPattern, ImprovementAnnouncement
 )
 
-logger = structlog.get_logger()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MetricWindow:
-    """Sliding window for metric collection"""
-    values: deque = field(default_factory=lambda: deque(maxlen=100))
-    timestamps: deque = field(default_factory=lambda: deque(maxlen=100))
-    
-    def add(self, value: float):
-        self.values.append(value)
-        self.timestamps.append(time.time())
-    
-    def mean(self) -> float:
-        return statistics.mean(self.values) if self.values else 0.0
-    
-    def stdev(self) -> float:
-        return statistics.stdev(self.values) if len(self.values) > 1 else 0.0
-    
-    def min(self) -> float:
-        return min(self.values) if self.values else 0.0
-    
-    def max(self) -> float:
-        return max(self.values) if self.values else 0.0
+class MetricSnapshot:
+    """Snapshot of performance metrics at a point in time"""
+    timestamp: datetime
+    metrics: PerformanceMetrics
+    context: Dict[str, Any] = field(default_factory=dict)
 
 
 class ImprovementTracker:
     """
-    Tracks performance metrics and detects significant improvements.
-    
-    Features:
-    - Performance metric tracking (accuracy, latency, confidence)
-    - Statistical significance detection
-    - Improvement packaging
-    - Compatibility checking
-    - Effectiveness measurement
+    Tracks local improvements and packages them for propagation
+
+    Monitors performance metrics over time, detects improvements,
+    and creates improvement packages ready for mesh propagation.
     """
-    
-    def __init__(
-        self,
-        node_id: str,
-        node_version: str = "1.0.0",
-        significance_threshold: float = 0.05,  # 5% improvement threshold
-        min_samples: int = 10,
-    ):
-        self.node_id = node_id
-        self.node_version = node_version
-        self.significance_threshold = significance_threshold
-        self.min_samples = min_samples
-        
-        # Metric windows: metric_name -> MetricWindow
-        self._metrics: Dict[str, MetricWindow] = defaultdict(MetricWindow)
-        
-        # Baseline metrics (before improvements)
-        self._baselines: Dict[str, float] = {}
-        
-        # Applied improvements
-        self._applied: Dict[str, ImprovementPackage] = {}
-        
-        # Improvement effectiveness tracking
-        self._effectiveness: Dict[str, ImprovementMetrics] = {}
-        
-        # Pending improvements (detected but not yet packaged)
-        self._pending_improvements: List[Dict[str, Any]] = []
-        
-        # Callbacks
-        self._on_improvement_detected: Optional[Callable] = None
-        
-        logger.info("ImprovementTracker initialized", node_id=node_id)
-    
-    def record_metric(self, name: str, value: float):
-        """Record a performance metric value"""
-        self._metrics[name].add(value)
-        
-        # Check for significant improvement
-        if len(self._metrics[name].values) >= self.min_samples:
-            self._check_for_improvement(name)
-    
-    def set_baseline(self, name: str, value: float):
-        """Set baseline value for a metric"""
-        self._baselines[name] = value
-        logger.debug("Baseline set", metric=name, value=value)
-    
-    def get_current_value(self, name: str) -> float:
-        """Get current (mean) value for a metric"""
-        return self._metrics[name].mean()
-    
-    def _check_for_improvement(self, metric_name: str):
-        """Check if metric shows significant improvement over baseline"""
-        baseline = self._baselines.get(metric_name)
-        if baseline is None:
-            # First run: set baseline
-            self._baselines[metric_name] = self._metrics[metric_name].mean()
-            return
-        
-        current = self._metrics[metric_name].mean()
-        
-        # Calculate improvement percentage
-        if baseline > 0:
-            improvement_pct = ((current - baseline) / baseline) * 100
-        else:
-            improvement_pct = 0
-        
-        # Check significance (depends on metric type)
-        # For latency, lower is better, so negate
-        if "latency" in metric_name.lower():
-            improvement_pct = -improvement_pct
-        
-        if improvement_pct >= self.significance_threshold * 100:
-            self._register_improvement(metric_name, improvement_pct, baseline, current)
-    
-    def _register_improvement(
-        self,
-        metric_name: str,
-        improvement_pct: float,
-        baseline: float,
-        current: float,
-    ):
-        """Register a detected improvement"""
-        improvement_info = {
-            "metric": metric_name,
-            "improvement_pct": improvement_pct,
-            "baseline": baseline,
-            "current": current,
-            "detected_at": datetime.utcnow(),
-        }
-        
-        self._pending_improvements.append(improvement_info)
-        
-        logger.info(
-            "Improvement detected",
-            metric=metric_name,
-            improvement_pct=f"{improvement_pct:.2f}%",
-            baseline=f"{baseline:.4f}",
-            current=f"{current:.4f}",
-        )
-        
-        # Notify callback if set
-        if self._on_improvement_detected:
-            self._on_improvement_detected(improvement_info)
-    
-    def package_improvement(
-        self,
-        improvement_type: ImprovementType,
-        data: bytes,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> ImprovementPackage:
+
+    def __init__(self, node_id: str, min_improvement_threshold: float = 5.0,
+                 statistical_significance_level: float = 0.95,
+                 min_samples_for_detection: int = 10):
         """
-        Package a detected improvement for propagation.
-        
+        Initialize improvement tracker
+
         Args:
-            improvement_type: Type of improvement
-            data: Improvement data (weights, patterns, etc.)
-            metadata: Additional metadata
-        
+            node_id: Unique identifier for this node
+            min_improvement_threshold: Minimum improvement % to consider (default 5%)
+            statistical_significance_level: Confidence level for statistical tests (0.95 = 95%)
+            min_samples_for_detection: Minimum samples needed before detecting improvement
+        """
+        self.node_id = node_id
+        self.min_improvement_threshold = min_improvement_threshold
+        self.statistical_significance_level = statistical_significance_level
+        self.min_samples_for_detection = min_samples_for_detection
+
+        # Metric history (rolling window)
+        self._metric_history: Dict[str, deque] = {}  # component_name -> deque of MetricSnapshot
+        self._history_lock = threading.RLock()
+
+        # Baseline metrics (last known good state)
+        self._baselines: Dict[str, PerformanceMetrics] = {}
+
+        # Tracked improvements (pending propagation)
+        self._pending_improvements: Dict[str, ImprovementPackage] = {}
+        self._improvements_lock = threading.RLock()
+
+        # Callbacks
+        self.on_improvement_detected: Optional[Callable[[ImprovementPackage], None]] = None
+
+        # Statistics
+        self.stats = {
+            "improvements_detected": 0,
+            "improvements_propagated": 0,
+            "improvements_applied": 0,
+            "improvements_rejected": 0,
+        }
+
+        logger.info(f"ImprovementTracker initialized for node {node_id}")
+
+    def record_metrics(self, component_name: str, metrics: PerformanceMetrics,
+                      context: Optional[Dict[str, Any]] = None):
+        """
+        Record performance metrics for a component
+
+        Args:
+            component_name: Name of the component (e.g., "risk_assessment", "memory_l1")
+            metrics: Current performance metrics
+            context: Additional context (model version, config hash, etc.)
+        """
+        snapshot = MetricSnapshot(
+            timestamp=datetime.now(timezone.utc),
+            metrics=metrics,
+            context=context or {}
+        )
+
+        with self._history_lock:
+            if component_name not in self._metric_history:
+                self._metric_history[component_name] = deque(maxlen=1000)
+
+            self._metric_history[component_name].append(snapshot)
+
+            # Update baseline if this is better than current baseline
+            if component_name not in self._baselines:
+                self._baselines[component_name] = metrics
+            else:
+                baseline = self._baselines[component_name]
+                if metrics.improvement_percentage(baseline) > 0:
+                    # New baseline established
+                    self._baselines[component_name] = metrics
+
+    def detect_improvement(self, component_name: str,
+                          improvement_type: ImprovementType,
+                          improvement_data: Any,
+                          requires_version: Optional[str] = None,
+                          requires_architecture: Optional[str] = None,
+                          requires_capabilities: Optional[List[str]] = None) -> Optional[ImprovementPackage]:
+        """
+        Detect if there's been a statistically significant improvement
+
+        Args:
+            component_name: Component that improved
+            improvement_type: Type of improvement (weights, config, pattern)
+            improvement_data: The actual improvement data
+            requires_version: Version requirement (if any)
+            requires_architecture: Architecture requirement (if any)
+            requires_capabilities: Required capabilities (if any)
+
         Returns:
-            ImprovementPackage ready for propagation
+            ImprovementPackage if improvement detected, None otherwise
         """
-        # Calculate overall gain from pending improvements
-        total_gain = sum(
-            p["improvement_pct"] for p in self._pending_improvements
-        ) / max(len(self._pending_improvements), 1)
-        
-        # Determine priority based on gain
-        if total_gain > 20:
-            priority = ImprovementPriority.CRITICAL
-        elif total_gain > 10:
-            priority = ImprovementPriority.NORMAL
-        else:
-            priority = ImprovementPriority.MINOR
-        
-        package = ImprovementPackage(
-            improvement_type=improvement_type,
-            source_node=self.node_id,
-            version=self.node_version,
-            gain_percent=total_gain,
-            priority=priority,
-            data=data,
-            metadata=metadata or {},
-            required_version=self.node_version,
-        )
-        
-        # Clear pending improvements
-        self._pending_improvements.clear()
-        
-        logger.info(
-            "Improvement packaged",
-            id=package.improvement_id,
-            type=improvement_type.value,
-            gain=f"{total_gain:.2f}%",
-            priority=priority.value,
-        )
-        
-        return package
-    
-    def check_compatibility(self, package: ImprovementPackage) -> bool:
-        """Check if an incoming improvement is compatible"""
-        return package.is_compatible(self.node_version)
-    
-    def apply_improvement(self, package: ImprovementPackage) -> bool:
+        with self._history_lock:
+            if component_name not in self._metric_history:
+                logger.debug(f"No metric history for {component_name}")
+                return None
+
+            history = self._metric_history[component_name]
+            if len(history) < self.min_samples_for_detection:
+                logger.debug(f"Not enough samples for {component_name}: {len(history)} < {self.min_samples_for_detection}")
+                return None
+
+            # Get baseline (from before improvement)
+            baseline = self._baselines.get(component_name)
+            if not baseline:
+                baseline = history[0].metrics
+
+            # Get recent metrics (after improvement)
+            recent_snapshots = list(history)[-self.min_samples_for_detection:]
+            recent_metrics = [s.metrics for s in recent_snapshots]
+
+            # Calculate average recent metrics
+            avg_recent = PerformanceMetrics(
+                accuracy=mean([m.accuracy for m in recent_metrics]),
+                precision=mean([m.precision for m in recent_metrics]),
+                recall=mean([m.recall for m in recent_metrics]),
+                f1_score=mean([m.f1_score for m in recent_metrics]),
+                latency_ms=mean([m.latency_ms for m in recent_metrics]),
+                throughput=mean([m.throughput for m in recent_metrics]),
+                confidence=mean([m.confidence for m in recent_metrics]),
+                error_rate=mean([m.error_rate for m in recent_metrics]),
+            )
+
+            # Calculate improvement percentage
+            improvement_pct = avg_recent.improvement_percentage(baseline)
+
+            if improvement_pct < self.min_improvement_threshold:
+                logger.debug(f"Improvement {improvement_pct:.2f}% below threshold {self.min_improvement_threshold}%")
+                return None
+
+            # Statistical significance test (simple t-test approximation)
+            if not self._is_statistically_significant(history, baseline, avg_recent):
+                logger.debug(f"Improvement not statistically significant")
+                return None
+
+            # Determine priority based on improvement magnitude
+            if improvement_pct >= 15.0:
+                priority = ImprovementPriority.CRITICAL
+            elif improvement_pct >= 10.0:
+                priority = ImprovementPriority.HIGH
+            elif improvement_pct >= 7.0:
+                priority = ImprovementPriority.NORMAL
+            else:
+                priority = ImprovementPriority.LOW
+
+            # Determine compatibility level
+            compatibility = CompatibilityLevel.UNIVERSAL
+            if requires_version or requires_architecture or requires_capabilities:
+                if requires_architecture:
+                    compatibility = CompatibilityLevel.ARCHITECTURE_SPECIFIC
+                elif requires_version:
+                    compatibility = CompatibilityLevel.VERSION_SPECIFIC
+                else:
+                    compatibility = CompatibilityLevel.CUSTOM
+
+            # Create improvement package
+            improvement_id = str(uuid.uuid4())
+
+            package = ImprovementPackage(
+                improvement_id=improvement_id,
+                improvement_type=improvement_type,
+                priority=priority,
+                compatibility=compatibility,
+                source_node_id=self.node_id,
+                baseline_metrics=baseline,
+                improved_metrics=avg_recent,
+                improvement_percentage=improvement_pct,
+                requires_version=requires_version,
+                requires_architecture=requires_architecture,
+                requires_capabilities=requires_capabilities or [],
+            )
+
+            # Attach improvement data
+            if improvement_type == ImprovementType.MODEL_WEIGHTS:
+                package.weight_delta = improvement_data
+            elif improvement_type == ImprovementType.CONFIG_TUNING:
+                package.config_tuning = improvement_data
+            elif improvement_type == ImprovementType.LEARNED_PATTERN:
+                package.learned_pattern = improvement_data
+            else:
+                package.raw_data = improvement_data.pack() if hasattr(improvement_data, 'pack') else json.dumps(improvement_data).encode()
+                package.raw_data_type = improvement_type.name
+
+            # Compute validation hash
+            package.validation_hash = package.compute_hash()
+
+            # Store pending improvement
+            with self._improvements_lock:
+                self._pending_improvements[improvement_id] = package
+
+            self.stats["improvements_detected"] += 1
+
+            logger.info(f"Improvement detected: {improvement_id} ({improvement_pct:.2f}% improvement, priority={priority.name})")
+
+            # Notify callback
+            if self.on_improvement_detected:
+                try:
+                    self.on_improvement_detected(package)
+                except Exception as e:
+                    logger.error(f"Error in improvement callback: {e}")
+
+            return package
+
+    def _is_statistically_significant(self, history: deque, baseline: PerformanceMetrics,
+                                     improved: PerformanceMetrics) -> bool:
         """
-        Record that an improvement was applied.
-        
-        Starts effectiveness tracking.
+        Check if improvement is statistically significant
+
+        Uses a simple approach: compare means with standard deviation check.
+        In production, would use proper t-test or Mann-Whitney U test.
         """
-        if package.improvement_id in self._applied:
-            logger.warning("Improvement already applied", id=package.improvement_id)
+        if len(history) < self.min_samples_for_detection:
             return False
-        
-        self._applied[package.improvement_id] = package
-        
-        # Capture current metrics as "before"
-        metrics = ImprovementMetrics(
-            improvement_id=package.improvement_id,
-            source_node=package.source_node,
-            accuracy_before=self.get_current_value("accuracy"),
-            latency_before_ms=self.get_current_value("latency"),
-            confidence_before=self.get_current_value("confidence"),
+
+        # Get accuracy values from history
+        accuracies = [s.metrics.accuracy for s in history]
+
+        if len(accuracies) < 2:
+            return False
+
+        # Simple check: improved mean should be > baseline + some margin
+        baseline_acc = baseline.accuracy
+        improved_acc = improved.accuracy
+
+        if improved_acc <= baseline_acc:
+            return False
+
+        # Check if improvement is beyond noise (using standard deviation)
+        try:
+            acc_std = stdev(accuracies)
+            improvement_margin = improved_acc - baseline_acc
+
+            # Improvement should be at least 2 standard deviations above baseline
+            # (simplified statistical test)
+            if improvement_margin > 2 * acc_std:
+                return True
+        except:
+            # If we can't compute std, use simple threshold
+            pass
+
+        # Fallback: improvement must be substantial
+        return (improved_acc - baseline_acc) > 0.01  # At least 1% absolute improvement
+
+    def get_pending_improvements(self) -> List[ImprovementPackage]:
+        """Get all pending improvements ready for propagation"""
+        with self._improvements_lock:
+            return list(self._pending_improvements.values())
+
+    def get_improvement(self, improvement_id: str) -> Optional[ImprovementPackage]:
+        """Get a specific improvement by ID"""
+        with self._improvements_lock:
+            return self._pending_improvements.get(improvement_id)
+
+    def mark_propagated(self, improvement_id: str):
+        """Mark an improvement as propagated"""
+        with self._improvements_lock:
+            if improvement_id in self._pending_improvements:
+                del self._pending_improvements[improvement_id]
+                self.stats["improvements_propagated"] += 1
+
+    def record_improvement_applied(self, improvement_id: str, success: bool,
+                                  new_metrics: Optional[PerformanceMetrics] = None):
+        """Record that an improvement was applied (from another node)"""
+        if success:
+            self.stats["improvements_applied"] += 1
+            if new_metrics:
+                # Update baseline if this is better
+                # (would need component_name to update correct baseline)
+                logger.info(f"Improvement {improvement_id} applied successfully")
+        else:
+            self.stats["improvements_rejected"] += 1
+
+    def create_announcement(self, improvement: ImprovementPackage) -> ImprovementAnnouncement:
+        """Create an announcement for an improvement"""
+        return ImprovementAnnouncement(
+            improvement_id=improvement.improvement_id,
+            improvement_type=improvement.improvement_type,
+            priority=improvement.priority,
+            source_node_id=improvement.source_node_id,
+            improvement_percentage=improvement.improvement_percentage,
+            size_bytes=improvement.get_size_bytes(),
+            created_at=improvement.created_at,
+            compatibility=improvement.compatibility,
+            requires_version=improvement.requires_version,
         )
-        
-        self._effectiveness[package.improvement_id] = metrics
-        
-        logger.info("Improvement applied", id=package.improvement_id)
-        return True
-    
-    def measure_effectiveness(self, improvement_id: str) -> Optional[ImprovementMetrics]:
-        """
-        Measure effectiveness of an applied improvement.
-        
-        Should be called after some time has passed.
-        """
-        if improvement_id not in self._effectiveness:
-            return None
-        
-        metrics = self._effectiveness[improvement_id]
-        
-        # Capture current metrics as "after"
-        metrics.accuracy_after = self.get_current_value("accuracy")
-        metrics.latency_after_ms = self.get_current_value("latency")
-        metrics.confidence_after = self.get_current_value("confidence")
-        
-        # Calculate effectiveness
-        metrics.calculate_effectiveness()
-        
-        logger.info(
-            "Effectiveness measured",
-            id=improvement_id,
-            effectiveness=f"{metrics.effectiveness:.4f}",
-        )
-        
-        return metrics
-    
-    def on_improvement_detected(self, callback: Callable):
-        """Set callback for when improvement is detected"""
-        self._on_improvement_detected = callback
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get tracker statistics"""
+        with self._history_lock:
+            components_tracked = len(self._metric_history)
+            total_samples = sum(len(h) for h in self._metric_history.values())
+
+        with self._improvements_lock:
+            pending_count = len(self._pending_improvements)
+
         return {
-            "node_id": self.node_id,
-            "metrics_tracked": len(self._metrics),
-            "baselines_set": len(self._baselines),
-            "improvements_applied": len(self._applied),
-            "pending_improvements": len(self._pending_improvements),
-            "current_metrics": {
-                name: {
-                    "mean": window.mean(),
-                    "stdev": window.stdev(),
-                    "samples": len(window.values),
-                }
-                for name, window in self._metrics.items()
-            },
+            **self.stats,
+            "components_tracked": components_tracked,
+            "total_samples": total_samples,
+            "pending_improvements": pending_count,
+            "min_improvement_threshold": self.min_improvement_threshold,
         }
 
-
-# ============================================================================
-# Module exports
-# ============================================================================
-
-__all__ = [
-    "MetricWindow",
-    "ImprovementTracker",
-]

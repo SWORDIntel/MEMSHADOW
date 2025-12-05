@@ -1,358 +1,822 @@
+#!/usr/bin/env python3
 """
-Semantic Memory (L3 Tier)
+Semantic Memory (L3) for DSMIL Brain
 
-Long-term semantic knowledge storage with maximum fidelity embeddings.
-Compressed and stored on cold storage for high capacity.
-
-Based on: HUB_DOCS/MEMSHADOW_INTEGRATION.md
+Long-term knowledge graph storage:
+- Concept nodes with relationship edges
+- Confidence scoring on facts
+- Auto-extraction from episodic memory
+- Forgetting curves with importance weighting
+- Temporal validity tracking
 """
 
-import hashlib
-import json
 import time
-import zlib
+import hashlib
+import threading
+import logging
+import math
 from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
-from uuid import uuid4
+from typing import Optional, Dict, List, Any, Set, Tuple, Iterator
+from datetime import datetime, timezone, timedelta
+from enum import Enum, auto
+from collections import defaultdict
+import json
 
-import structlog
+logger = logging.getLogger(__name__)
 
-logger = structlog.get_logger()
+
+class ConceptType(Enum):
+    """Types of concepts in the knowledge graph"""
+    ENTITY = auto()       # Named entity (person, org, location)
+    EVENT = auto()        # Event or occurrence
+    ATTRIBUTE = auto()    # Property or attribute
+    ACTION = auto()       # Action or behavior
+    STATE = auto()        # State or condition
+    ABSTRACT = auto()     # Abstract concept
+    RELATIONSHIP = auto() # Relationship type
+    THREAT = auto()       # Threat indicator
+    PATTERN = auto()      # Behavioral pattern
+    RULE = auto()         # Business/security rule
+
+
+class RelationType(Enum):
+    """Types of relationships between concepts"""
+    # Hierarchical
+    IS_A = auto()           # Type hierarchy
+    PART_OF = auto()        # Composition
+    HAS_PART = auto()       # Has component
+    INSTANCE_OF = auto()    # Instance relationship
+
+    # Causal
+    CAUSES = auto()         # Causal relationship
+    ENABLES = auto()        # Enabling condition
+    PREVENTS = auto()       # Prevention
+    INFLUENCES = auto()     # Influence
+
+    # Associative
+    RELATED_TO = auto()     # General relation
+    SIMILAR_TO = auto()     # Similarity
+    OPPOSITE_OF = auto()    # Opposition
+    CORRELATES_WITH = auto() # Correlation
+
+    # Temporal
+    PRECEDES = auto()       # Temporal order
+    FOLLOWS = auto()        # Temporal order
+    DURING = auto()         # Temporal containment
+
+    # Attribution
+    HAS_ATTRIBUTE = auto()  # Attribute assignment
+    PERFORMED_BY = auto()   # Actor
+    TARGETS = auto()        # Target of action
+    USES = auto()           # Tool/method usage
+
+    # Security-specific
+    INDICATES = auto()      # Threat indicator
+    MITIGATES = auto()      # Mitigation
+    EXPLOITS = auto()       # Exploitation
 
 
 @dataclass
-class SemanticConcept:
-    """A semantic concept with relationships"""
-    concept_id: str = field(default_factory=lambda: str(uuid4()))
-    name: str = ""
-    data: bytes = b""
-    embedding: Optional[bytes] = None
+class Concept:
+    """
+    Node in the knowledge graph
+    """
+    concept_id: str
+    name: str
+    concept_type: ConceptType
+
+    # Content
+    description: Optional[str] = None
+    attributes: Dict[str, Any] = field(default_factory=dict)
+
+    # Confidence and importance
+    confidence: float = 0.5  # 0-1, how confident we are in this concept
+    importance: float = 0.5  # 0-1, how important is this concept
+
+    # Temporal validity
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+
+    # Source tracking
+    source_episodes: Set[str] = field(default_factory=set)
+    evidence_count: int = 1
+
+    # Forgetting curve
+    last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    access_count: int = 0
+    retention_strength: float = 1.0
+
+    # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    # Relationships
-    related_to: Set[str] = field(default_factory=set)  # concept_ids
-    instances: Set[str] = field(default_factory=set)   # item_ids
-    
-    # Item storage within concept
-    item_data: Dict[str, bytes] = field(default_factory=dict)  # item_id -> data
-    item_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    
-    # Versioning
-    version: int = 1
-    created_at: int = field(default_factory=lambda: int(time.time() * 1e9))
-    updated_at: int = field(default_factory=lambda: int(time.time() * 1e9))
-    
-    # Compression
-    is_compressed: bool = False
-    original_size: int = 0
-    
-    def compress(self):
-        """Compress the data"""
-        if self.is_compressed:
-            return
-        self.original_size = len(self.data)
-        compressed = zlib.compress(self.data, level=9)
-        if len(compressed) < len(self.data):
-            self.data = compressed
-            self.is_compressed = True
-    
-    def decompress(self) -> bytes:
-        """Get decompressed data"""
-        if self.is_compressed:
-            return zlib.decompress(self.data)
-        return self.data
-    
-    def add_relationship(self, other_concept_id: str):
-        """Add a relationship to another concept"""
-        self.related_to.add(other_concept_id)
-        self.updated_at = int(time.time() * 1e9)
-        self.version += 1
-    
-    def store_item(self, item_id: str, data: bytes, metadata: Optional[Dict[str, Any]] = None):
-        """Store an item within this concept"""
-        self.instances.add(item_id)
-        self.item_data[item_id] = data
-        if metadata:
-            self.item_metadata[item_id] = metadata
-        self.updated_at = int(time.time() * 1e9)
-    
-    def get_item(self, item_id: str) -> Optional[bytes]:
-        """Get item data from concept"""
-        return self.item_data.get(item_id)
+    tags: Set[str] = field(default_factory=set)
+
+    # Timestamps
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def touch(self):
+        """Mark concept as accessed"""
+        self.last_accessed = datetime.now(timezone.utc)
+        self.access_count += 1
+        # Strengthen retention on access
+        self.retention_strength = min(1.0, self.retention_strength + 0.1)
+
+    def decay(self, decay_rate: float = 0.01):
+        """Apply forgetting curve decay"""
+        elapsed = (datetime.now(timezone.utc) - self.last_accessed).total_seconds()
+        # Ebbinghaus forgetting curve
+        self.retention_strength *= math.exp(-decay_rate * elapsed / 86400)  # Daily decay
+
+    def get_effective_importance(self) -> float:
+        """Get importance weighted by retention"""
+        self.decay()
+        return self.importance * self.confidence * self.retention_strength
+
+    def reinforce(self, evidence_source: Optional[str] = None):
+        """Reinforce concept with additional evidence"""
+        self.evidence_count += 1
+        self.confidence = min(1.0, self.confidence + 0.05)
+        if evidence_source:
+            self.source_episodes.add(evidence_source)
+        self.touch()
+
+    def is_valid(self, at_time: Optional[datetime] = None) -> bool:
+        """Check if concept is valid at given time"""
+        check_time = at_time or datetime.now(timezone.utc)
+
+        if self.valid_from and check_time < self.valid_from:
+            return False
+        if self.valid_until and check_time > self.valid_until:
+            return False
+        return True
+
+    def to_dict(self) -> Dict:
+        return {
+            "concept_id": self.concept_id,
+            "name": self.name,
+            "concept_type": self.concept_type.name,
+            "description": self.description,
+            "attributes": self.attributes,
+            "confidence": self.confidence,
+            "importance": self.importance,
+            "evidence_count": self.evidence_count,
+            "tags": list(self.tags),
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass
+class Relationship:
+    """
+    Edge in the knowledge graph
+    """
+    relationship_id: str
+    source_id: str
+    target_id: str
+    relation_type: RelationType
+
+    # Strength and confidence
+    strength: float = 0.5  # 0-1, how strong is this relationship
+    confidence: float = 0.5  # 0-1, how confident are we
+
+    # Direction
+    is_bidirectional: bool = False
+
+    # Temporal
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+
+    # Evidence
+    evidence: List[str] = field(default_factory=list)
+    source_episodes: Set[str] = field(default_factory=set)
+
+    # Metadata
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # Timestamps
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def reinforce(self, evidence_source: Optional[str] = None):
+        """Reinforce relationship with evidence"""
+        self.confidence = min(1.0, self.confidence + 0.05)
+        self.strength = min(1.0, self.strength + 0.02)
+        if evidence_source:
+            self.source_episodes.add(evidence_source)
+
+    def to_dict(self) -> Dict:
+        return {
+            "relationship_id": self.relationship_id,
+            "source_id": self.source_id,
+            "target_id": self.target_id,
+            "relation_type": self.relation_type.name,
+            "strength": self.strength,
+            "confidence": self.confidence,
+            "is_bidirectional": self.is_bidirectional,
+        }
+
+
+class KnowledgeGraph:
+    """
+    Core knowledge graph implementation
+
+    Provides:
+    - Concept and relationship storage
+    - Graph traversal
+    - Pattern matching
+    - Inference support
+    """
+
+    def __init__(self):
+        self._concepts: Dict[str, Concept] = {}
+        self._relationships: Dict[str, Relationship] = {}
+
+        # Indices for fast lookup
+        self._outgoing: Dict[str, Set[str]] = defaultdict(set)  # concept_id -> relationship_ids
+        self._incoming: Dict[str, Set[str]] = defaultdict(set)  # concept_id -> relationship_ids
+        self._by_type: Dict[ConceptType, Set[str]] = defaultdict(set)
+        self._by_name: Dict[str, str] = {}  # name -> concept_id (for quick lookup)
+
+        self._lock = threading.RLock()
+
+    def add_concept(self, concept: Concept) -> str:
+        """Add or update concept"""
+        with self._lock:
+            existing = self._by_name.get(concept.name.lower())
+            if existing:
+                # Reinforce existing concept
+                self._concepts[existing].reinforce()
+                return existing
+
+            self._concepts[concept.concept_id] = concept
+            self._by_type[concept.concept_type].add(concept.concept_id)
+            self._by_name[concept.name.lower()] = concept.concept_id
+
+            return concept.concept_id
+
+    def add_relationship(self, relationship: Relationship) -> str:
+        """Add or reinforce relationship"""
+        with self._lock:
+            # Check for existing relationship
+            for rel_id in self._outgoing.get(relationship.source_id, set()):
+                rel = self._relationships.get(rel_id)
+                if (rel and rel.target_id == relationship.target_id and
+                    rel.relation_type == relationship.relation_type):
+                    # Reinforce existing
+                    rel.reinforce()
+                    return rel_id
+
+            self._relationships[relationship.relationship_id] = relationship
+            self._outgoing[relationship.source_id].add(relationship.relationship_id)
+            self._incoming[relationship.target_id].add(relationship.relationship_id)
+
+            if relationship.is_bidirectional:
+                self._outgoing[relationship.target_id].add(relationship.relationship_id)
+                self._incoming[relationship.source_id].add(relationship.relationship_id)
+
+            return relationship.relationship_id
+
+    def get_concept(self, concept_id: str) -> Optional[Concept]:
+        """Get concept by ID"""
+        with self._lock:
+            concept = self._concepts.get(concept_id)
+            if concept:
+                concept.touch()
+            return concept
+
+    def find_concept(self, name: str) -> Optional[Concept]:
+        """Find concept by name"""
+        with self._lock:
+            concept_id = self._by_name.get(name.lower())
+            if concept_id:
+                return self.get_concept(concept_id)
+            return None
+
+    def get_neighbors(self, concept_id: str,
+                      relation_types: Optional[Set[RelationType]] = None,
+                      direction: str = "both") -> List[Tuple[Concept, Relationship]]:
+        """
+        Get neighboring concepts
+
+        Args:
+            concept_id: Source concept
+            relation_types: Filter by relation types
+            direction: "outgoing", "incoming", or "both"
+        """
+        with self._lock:
+            neighbors = []
+
+            rel_ids = set()
+            if direction in ("outgoing", "both"):
+                rel_ids |= self._outgoing.get(concept_id, set())
+            if direction in ("incoming", "both"):
+                rel_ids |= self._incoming.get(concept_id, set())
+
+            for rel_id in rel_ids:
+                rel = self._relationships.get(rel_id)
+                if not rel:
+                    continue
+
+                if relation_types and rel.relation_type not in relation_types:
+                    continue
+
+                # Get the other concept
+                other_id = rel.target_id if rel.source_id == concept_id else rel.source_id
+                other = self._concepts.get(other_id)
+
+                if other:
+                    neighbors.append((other, rel))
+
+            return neighbors
+
+    def traverse(self, start_id: str, max_depth: int = 3,
+                 relation_types: Optional[Set[RelationType]] = None) -> Dict[str, Concept]:
+        """
+        Traverse graph from starting concept
+
+        Returns:
+            Dict of concept_id -> Concept for all reachable concepts
+        """
+        with self._lock:
+            visited = {}
+            queue = [(start_id, 0)]
+
+            while queue:
+                current_id, depth = queue.pop(0)
+
+                if current_id in visited or depth > max_depth:
+                    continue
+
+                concept = self._concepts.get(current_id)
+                if not concept:
+                    continue
+
+                visited[current_id] = concept
+
+                # Add neighbors to queue
+                for neighbor, rel in self.get_neighbors(current_id, relation_types):
+                    if neighbor.concept_id not in visited:
+                        queue.append((neighbor.concept_id, depth + 1))
+
+            return visited
+
+    def find_path(self, start_id: str, end_id: str,
+                  max_depth: int = 5) -> Optional[List[Tuple[Concept, Relationship]]]:
+        """
+        Find path between two concepts
+        """
+        with self._lock:
+            if start_id == end_id:
+                return []
+
+            visited = {start_id}
+            queue = [(start_id, [])]
+
+            while queue:
+                current_id, path = queue.pop(0)
+
+                if len(path) >= max_depth:
+                    continue
+
+                for neighbor, rel in self.get_neighbors(current_id, direction="outgoing"):
+                    if neighbor.concept_id == end_id:
+                        return path + [(neighbor, rel)]
+
+                    if neighbor.concept_id not in visited:
+                        visited.add(neighbor.concept_id)
+                        queue.append((neighbor.concept_id, path + [(neighbor, rel)]))
+
+            return None
+
+    def query_by_type(self, concept_type: ConceptType) -> List[Concept]:
+        """Get all concepts of a type"""
+        with self._lock:
+            return [
+                self._concepts[cid]
+                for cid in self._by_type.get(concept_type, set())
+                if cid in self._concepts
+            ]
+
+    def get_stats(self) -> Dict:
+        """Get graph statistics"""
+        with self._lock:
+            return {
+                "concept_count": len(self._concepts),
+                "relationship_count": len(self._relationships),
+                "type_distribution": {
+                    t.name: len(ids)
+                    for t, ids in self._by_type.items()
+                },
+            }
 
 
 class SemanticMemory:
     """
-    L3 Semantic Memory Tier
-    
-    Characteristics:
-    - Long-term knowledge storage
-    - Maximum 4096-dimension embeddings
-    - Compressed storage
-    - Relationship/graph structure
-    - Cold storage backing
-    - Consolidation from L2
-    
-    Implements MEMSHADOW sync interface.
+    L3 Semantic Memory - Long-term knowledge storage
+
+    Features:
+    - Knowledge graph with concepts and relationships
+    - Confidence-based fact storage
+    - Forgetting curves for memory management
+    - Query and inference capabilities
+
+    Usage:
+        sm = SemanticMemory()
+
+        # Add knowledge
+        sm.add_fact("APT29", "IS_A", "Threat Actor", confidence=0.9)
+        sm.add_fact("APT29", "USES", "Cobalt Strike", confidence=0.8)
+
+        # Query
+        facts = sm.query("APT29")
+
+        # Get related concepts
+        related = sm.get_related("APT29", depth=2)
     """
-    
-    TIER_NAME = "L3_SEMANTIC"
-    MAX_DIMENSION = 4096
-    
-    def __init__(
-        self,
-        storage_path: Optional[str] = None,
-        compression_enabled: bool = True,
-        max_concepts: int = 100000,
-    ):
-        self.storage_path = Path(storage_path) if storage_path else None
-        self.compression_enabled = compression_enabled
-        self.max_concepts = max_concepts
-        
-        # Concepts: concept_id -> SemanticConcept
-        self._concepts: Dict[str, SemanticConcept] = {}
-        
-        # Item to concept mapping
-        self._item_to_concept: Dict[str, str] = {}
-        
-        # Name index
-        self._name_index: Dict[str, str] = {}  # name -> concept_id
-        
-        # Stats
-        self._stats = {
-            "concepts_created": 0,
-            "items_stored": 0,
-            "items_retrieved": 0,
-            "relationships_created": 0,
-            "bytes_saved": 0,
+
+    def __init__(self, decay_rate: float = 0.001,
+                 min_retention: float = 0.1,
+                 forgetting_enabled: bool = True):
+        """
+        Initialize semantic memory
+
+        Args:
+            decay_rate: Rate of forgetting (per day)
+            min_retention: Minimum retention before forgetting
+            forgetting_enabled: Enable forgetting mechanism
+        """
+        self.graph = KnowledgeGraph()
+        self.decay_rate = decay_rate
+        self.min_retention = min_retention
+        self.forgetting_enabled = forgetting_enabled
+
+        self._lock = threading.RLock()
+
+        # Statistics
+        self.stats = {
+            "facts_added": 0,
+            "queries": 0,
+            "forgotten": 0,
         }
-        
-        logger.info(
-            "SemanticMemory initialized",
-            storage=storage_path,
-            compression=compression_enabled,
-        )
-    
-    async def store(
-        self,
-        item_id: str,
-        data: bytes,
-        metadata: Optional[Dict[str, Any]] = None,
-        concept_name: Optional[str] = None,
-        embedding: Optional[bytes] = None,
-    ) -> bool:
+
+        logger.info("SemanticMemory initialized")
+
+    def add_concept(self, name: str, concept_type: ConceptType,
+                   description: Optional[str] = None,
+                   attributes: Optional[Dict] = None,
+                   confidence: float = 0.5,
+                   importance: float = 0.5,
+                   source_episode: Optional[str] = None) -> Concept:
         """
-        Store item in semantic memory.
-        
-        Items can be associated with concepts for organization.
+        Add a concept to memory
+
+        Args:
+            name: Concept name
+            concept_type: Type of concept
+            description: Description
+            attributes: Attributes dict
+            confidence: Confidence level
+            importance: Importance level
+            source_episode: Source episode ID
+
+        Returns:
+            Created/updated Concept
         """
-        if concept_name:
-            # Get or create concept and store item within it
-            concept = await self._get_or_create_concept(concept_name)
-            concept.store_item(item_id, data, metadata)
-            if embedding:
-                concept.embedding = embedding
-            self._item_to_concept[item_id] = concept.concept_id
-        else:
-            # Create standalone concept for item
-            concept = SemanticConcept(
-                concept_id=item_id,
-                data=data,
-                embedding=embedding,
+        with self._lock:
+            # Generate ID
+            concept_id = hashlib.sha256(
+                f"{name}:{concept_type.name}".encode()
+            ).hexdigest()[:16]
+
+            # Check if exists
+            existing = self.graph.find_concept(name)
+            if existing:
+                existing.reinforce(source_episode)
+                return existing
+
+            concept = Concept(
+                concept_id=concept_id,
+                name=name,
+                concept_type=concept_type,
+                description=description,
+                attributes=attributes or {},
+                confidence=confidence,
+                importance=importance,
+            )
+
+            if source_episode:
+                concept.source_episodes.add(source_episode)
+
+            self.graph.add_concept(concept)
+            self.stats["facts_added"] += 1
+
+            return concept
+
+    def add_fact(self, subject: str, predicate: str, obj: str,
+                confidence: float = 0.5,
+                strength: float = 0.5,
+                source_episode: Optional[str] = None,
+                metadata: Optional[Dict] = None) -> Tuple[Concept, Relationship, Concept]:
+        """
+        Add a fact (triple) to memory
+
+        Args:
+            subject: Subject name
+            predicate: Relationship type
+            obj: Object name
+            confidence: Confidence in this fact
+            strength: Relationship strength
+            source_episode: Source episode ID
+            metadata: Additional metadata
+
+        Returns:
+            Tuple of (subject_concept, relationship, object_concept)
+        """
+        with self._lock:
+            # Parse predicate to relation type
+            try:
+                relation_type = RelationType[predicate.upper().replace(" ", "_")]
+            except KeyError:
+                relation_type = RelationType.RELATED_TO
+
+            # Create or get concepts
+            subject_concept = self.add_concept(
+                subject, ConceptType.ENTITY,
+                source_episode=source_episode
+            )
+            object_concept = self.add_concept(
+                obj, ConceptType.ENTITY,
+                source_episode=source_episode
+            )
+
+            # Create relationship
+            rel_id = hashlib.sha256(
+                f"{subject_concept.concept_id}:{predicate}:{object_concept.concept_id}".encode()
+            ).hexdigest()[:16]
+
+            relationship = Relationship(
+                relationship_id=rel_id,
+                source_id=subject_concept.concept_id,
+                target_id=object_concept.concept_id,
+                relation_type=relation_type,
+                strength=strength,
+                confidence=confidence,
                 metadata=metadata or {},
             )
-            concept.instances.add(item_id)
-            concept.item_data[item_id] = data
-            if self.compression_enabled:
-                concept.compress()
-            self._concepts[item_id] = concept
-            self._item_to_concept[item_id] = item_id
-        
-        self._stats["items_stored"] += 1
-        
-        logger.debug(
-            "Stored in L3",
-            item_id=item_id,
-            concept=concept_name,
-        )
-        
-        return True
-    
-    async def retrieve(self, item_id: str) -> Optional[bytes]:
-        """Retrieve item from semantic memory"""
-        concept_id = self._item_to_concept.get(item_id)
-        if not concept_id:
-            return None
-        
-        concept = self._concepts.get(concept_id)
-        if not concept:
-            return None
-        
-        # Get item-specific data if stored within concept
-        item_data = concept.get_item(item_id)
-        if item_data:
-            self._stats["items_retrieved"] += 1
-            return item_data
-        
-        # Fall back to concept data (for standalone items)
-        self._stats["items_retrieved"] += 1
-        return concept.decompress()
-    
-    async def delete(self, item_id: str) -> bool:
-        """Delete item from semantic memory"""
-        concept_id = self._item_to_concept.pop(item_id, None)
-        if not concept_id:
-            return False
-        
-        # Remove from concept instances
-        concept = self._concepts.get(concept_id)
-        if concept:
-            concept.instances.discard(item_id)
-            # If concept has no instances and is standalone, remove it
-            if not concept.instances and concept_id == item_id:
-                del self._concepts[concept_id]
-        
-        return True
-    
-    async def list_items(self, since_timestamp: Optional[int] = None) -> List[str]:
-        """List all item IDs"""
-        if since_timestamp is None:
-            return list(self._item_to_concept.keys())
-        
-        result = []
-        for item_id, concept_id in self._item_to_concept.items():
-            concept = self._concepts.get(concept_id)
-            if concept and concept.created_at >= since_timestamp:
-                result.append(item_id)
-        return result
-    
-    async def get_metadata(self, item_id: str) -> Optional[Dict[str, Any]]:
-        """Get metadata for an item"""
-        concept_id = self._item_to_concept.get(item_id)
-        if not concept_id:
-            return None
-        
-        concept = self._concepts.get(concept_id)
-        return concept.metadata if concept else None
-    
-    async def _get_or_create_concept(self, name: str) -> SemanticConcept:
-        """Get existing concept by name or create new one"""
-        if name in self._name_index:
-            concept_id = self._name_index[name]
-            return self._concepts[concept_id]
-        
-        # Create new concept
-        concept = SemanticConcept(name=name)
-        self._concepts[concept.concept_id] = concept
-        self._name_index[name] = concept.concept_id
-        
-        self._stats["concepts_created"] += 1
-        
-        logger.debug("Concept created", name=name, id=concept.concept_id)
-        return concept
-    
-    async def get_concept(self, concept_id: str) -> Optional[SemanticConcept]:
-        """Get a concept by ID"""
-        return self._concepts.get(concept_id)
-    
-    async def get_concept_by_name(self, name: str) -> Optional[SemanticConcept]:
-        """Get a concept by name"""
-        concept_id = self._name_index.get(name)
-        return self._concepts.get(concept_id) if concept_id else None
-    
-    async def add_relationship(
-        self,
-        concept_id: str,
-        related_concept_id: str,
-        bidirectional: bool = True,
-    ):
-        """Add a relationship between concepts"""
-        concept = self._concepts.get(concept_id)
-        if not concept:
+
+            if source_episode:
+                relationship.source_episodes.add(source_episode)
+
+            self.graph.add_relationship(relationship)
+            self.stats["facts_added"] += 1
+
+            return subject_concept, relationship, object_concept
+
+    def query(self, name: str) -> Optional[Dict]:
+        """
+        Query knowledge about a concept
+
+        Args:
+            name: Concept name to query
+
+        Returns:
+            Dict with concept info and relationships
+        """
+        with self._lock:
+            self.stats["queries"] += 1
+
+            concept = self.graph.find_concept(name)
+            if not concept:
+                return None
+
+            concept.touch()
+
+            # Get all relationships
+            neighbors = self.graph.get_neighbors(concept.concept_id)
+
+            relationships = []
+            for neighbor, rel in neighbors:
+                relationships.append({
+                    "relation": rel.relation_type.name,
+                    "target": neighbor.name,
+                    "strength": rel.strength,
+                    "confidence": rel.confidence,
+                })
+
+            return {
+                "concept": concept.to_dict(),
+                "relationships": relationships,
+                "effective_importance": concept.get_effective_importance(),
+            }
+
+    def get_related(self, name: str, depth: int = 2,
+                   min_confidence: float = 0.3) -> Dict[str, Concept]:
+        """
+        Get related concepts
+
+        Args:
+            name: Starting concept name
+            depth: How many hops to traverse
+            min_confidence: Minimum confidence filter
+
+        Returns:
+            Dict of concept_id -> Concept
+        """
+        with self._lock:
+            concept = self.graph.find_concept(name)
+            if not concept:
+                return {}
+
+            related = self.graph.traverse(concept.concept_id, max_depth=depth)
+
+            # Filter by confidence
+            return {
+                cid: c for cid, c in related.items()
+                if c.confidence >= min_confidence
+            }
+
+    def find_path(self, from_name: str, to_name: str) -> Optional[List[str]]:
+        """
+        Find relationship path between two concepts
+
+        Returns:
+            List of relationship descriptions forming path
+        """
+        with self._lock:
+            from_concept = self.graph.find_concept(from_name)
+            to_concept = self.graph.find_concept(to_name)
+
+            if not from_concept or not to_concept:
+                return None
+
+            path = self.graph.find_path(from_concept.concept_id, to_concept.concept_id)
+
+            if path is None:
+                return None
+
+            return [
+                f"--[{rel.relation_type.name}]--> {concept.name}"
+                for concept, rel in path
+            ]
+
+    def infer(self, query_pattern: Dict) -> List[Dict]:
+        """
+        Simple inference based on patterns
+
+        Args:
+            query_pattern: Pattern to match
+                e.g., {"type": "THREAT", "relation": "TARGETS"}
+
+        Returns:
+            List of matching facts
+        """
+        with self._lock:
+            results = []
+
+            # Get concepts of specified type
+            concept_type = None
+            if "type" in query_pattern:
+                try:
+                    concept_type = ConceptType[query_pattern["type"]]
+                except KeyError:
+                    pass
+
+            if concept_type:
+                concepts = self.graph.query_by_type(concept_type)
+            else:
+                concepts = list(self.graph._concepts.values())
+
+            # Filter by relation if specified
+            if "relation" in query_pattern:
+                try:
+                    rel_type = RelationType[query_pattern["relation"]]
+                    for concept in concepts:
+                        neighbors = self.graph.get_neighbors(
+                            concept.concept_id,
+                            relation_types={rel_type}
+                        )
+                        for neighbor, rel in neighbors:
+                            results.append({
+                                "subject": concept.name,
+                                "relation": rel.relation_type.name,
+                                "object": neighbor.name,
+                                "confidence": rel.confidence,
+                            })
+                except KeyError:
+                    pass
+            else:
+                results = [c.to_dict() for c in concepts]
+
+            return results
+
+    def apply_forgetting(self):
+        """Apply forgetting curve to all concepts"""
+        if not self.forgetting_enabled:
             return
-        
-        concept.add_relationship(related_concept_id)
-        
-        if bidirectional:
-            related = self._concepts.get(related_concept_id)
-            if related:
-                related.add_relationship(concept_id)
-        
-        self._stats["relationships_created"] += 1
-    
-    async def get_related_concepts(self, concept_id: str) -> List[SemanticConcept]:
-        """Get concepts related to a given concept"""
-        concept = self._concepts.get(concept_id)
-        if not concept:
-            return []
-        
-        return [
-            self._concepts[rid]
-            for rid in concept.related_to
-            if rid in self._concepts
-        ]
-    
-    async def consolidate_from_episodic(
-        self,
-        episode_data: Dict[str, bytes],
-        concept_name: str,
-    ):
+
+        with self._lock:
+            to_forget = []
+
+            for concept in self.graph._concepts.values():
+                concept.decay(self.decay_rate)
+
+                if concept.retention_strength < self.min_retention:
+                    to_forget.append(concept.concept_id)
+
+            # Remove forgotten concepts
+            for concept_id in to_forget:
+                del self.graph._concepts[concept_id]
+                self.stats["forgotten"] += 1
+
+            if to_forget:
+                logger.info(f"Forgot {len(to_forget)} concepts due to decay")
+
+    def get_consolidation_candidates(self, min_importance: float = 0.7,
+                                    min_evidence: int = 2) -> List[Concept]:
         """
-        Consolidate episodic memories into semantic knowledge.
-        
-        This is the L2 -> L3 transition process.
+        Get concepts that are well-established and important
+        These are candidates for being considered "core knowledge"
         """
-        concept = await self._get_or_create_concept(concept_name)
-        
-        for item_id, data in episode_data.items():
-            concept.instances.add(item_id)
-            self._item_to_concept[item_id] = concept.concept_id
-        
-        # Merge data (simplistic: just concatenate)
-        merged_data = b"".join(episode_data.values())
-        concept.data = merged_data
-        
-        if self.compression_enabled:
-            original_size = len(concept.data)
-            concept.compress()
-            self._stats["bytes_saved"] += original_size - len(concept.data)
-        
-        logger.info(
-            "Consolidated to L3",
-            concept=concept_name,
-            items=len(episode_data),
-        )
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get memory tier statistics"""
-        total_size = sum(len(c.data) for c in self._concepts.values())
-        compressed_count = sum(1 for c in self._concepts.values() if c.is_compressed)
-        
-        return {
-            "tier": self.TIER_NAME,
-            "max_concepts": self.max_concepts,
-            "current_concepts": len(self._concepts),
-            "total_items": len(self._item_to_concept),
-            "compressed_concepts": compressed_count,
-            "total_size_bytes": total_size,
-            **self._stats,
-        }
-    
-    def clear(self):
-        """Clear all semantic memory"""
-        self._concepts.clear()
-        self._item_to_concept.clear()
-        self._name_index.clear()
-        logger.info("Semantic memory cleared")
+        with self._lock:
+            candidates = []
+
+            for concept in self.graph._concepts.values():
+                if (concept.get_effective_importance() >= min_importance and
+                    concept.evidence_count >= min_evidence):
+                    candidates.append(concept)
+
+            return candidates
+
+    def export_for_sync(self) -> Dict:
+        """Export knowledge graph for synchronization"""
+        with self._lock:
+            return {
+                "concepts": {
+                    cid: c.to_dict()
+                    for cid, c in self.graph._concepts.items()
+                },
+                "relationships": {
+                    rid: r.to_dict()
+                    for rid, r in self.graph._relationships.items()
+                },
+                "stats": self.stats,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+    def get_stats(self) -> Dict:
+        """Get memory statistics"""
+        with self._lock:
+            graph_stats = self.graph.get_stats()
+            return {
+                **self.stats,
+                **graph_stats,
+            }
 
 
-# ============================================================================
-# Module exports
-# ============================================================================
+if __name__ == "__main__":
+    print("Semantic Memory Self-Test")
+    print("=" * 50)
 
-__all__ = [
-    "SemanticConcept",
-    "SemanticMemory",
-]
+    sm = SemanticMemory()
+
+    print(f"\n[1] Add Facts")
+    sm.add_fact("APT29", "IS_A", "Threat Actor", confidence=0.95)
+    sm.add_fact("APT29", "USES", "Cobalt Strike", confidence=0.85)
+    sm.add_fact("APT29", "TARGETS", "Government", confidence=0.90)
+    sm.add_fact("Cobalt Strike", "IS_A", "Malware", confidence=0.99)
+    sm.add_fact("Cobalt Strike", "USES", "Beacon Protocol", confidence=0.80)
+    print(f"    Added 5 facts")
+
+    print(f"\n[2] Query Concept")
+    result = sm.query("APT29")
+    if result:
+        print(f"    Name: {result['concept']['name']}")
+        print(f"    Type: {result['concept']['concept_type']}")
+        print(f"    Relationships: {len(result['relationships'])}")
+        for rel in result['relationships']:
+            print(f"      - {rel['relation']} -> {rel['target']}")
+
+    print(f"\n[3] Get Related")
+    related = sm.get_related("APT29", depth=2)
+    print(f"    Found {len(related)} related concepts:")
+    for cid, concept in related.items():
+        print(f"      - {concept.name} ({concept.concept_type.name})")
+
+    print(f"\n[4] Find Path")
+    path = sm.find_path("APT29", "Beacon Protocol")
+    if path:
+        print(f"    Path: APT29 {' '.join(path)}")
+
+    print(f"\n[5] Inference Query")
+    results = sm.infer({"type": "ENTITY", "relation": "USES"})
+    print(f"    Found {len(results)} results:")
+    for r in results[:3]:
+        print(f"      - {r['subject']} {r['relation']} {r['object']}")
+
+    print(f"\n[6] Statistics")
+    stats = sm.get_stats()
+    for key, value in stats.items():
+        print(f"    {key}: {value}")
+
+    print("\n" + "=" * 50)
+    print("Semantic Memory test complete")
+

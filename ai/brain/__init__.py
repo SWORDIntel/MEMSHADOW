@@ -1,15 +1,50 @@
+#!/usr/bin/env python3
 """
-DSMIL Brain
+DSMIL Second Brain: Distributed Intelligence Architecture
 
-Distributed brain network with memory tiers and MEMSHADOW protocol support.
+"NSA in a Program" - Distributed AI memory across many points with constant
+intelligence ingestion, analysis, cross-correlation, and autonomous improvement.
 
-Modules:
-- federation: Hub-spoke architecture, P2P improvements
-- memory: L1/L2/L3 memory tiers with sync protocol
+Central Hub Query Model:
+- All intelligence queries originate from the DSMIL central hub
+- Nodes receive queries, correlate locally, return results
+- Hub aggregates and synthesizes distributed responses
 
-Usage:
-    from ai.brain.federation import HubOrchestrator, SpokeClient
-    from ai.brain.memory import WorkingMemory, EpisodicMemory, SemanticMemory
+Architecture Layers:
+- Layer 0: Federated Node Network
+- Layer 1: CNSA Security Core
+- Layer 2: Distributed Memory Fabric
+- Layer 3: Self-Improving Vector Database
+- Layer 4: Predictive Intelligence Engine
+- Layer 5: Counter-Intelligence Suite
+- Layer 6: Temporal & 4D Intelligence
+- Layer 7: Covert Operations
+- Layer 8: Digital Immune System
+- Layer 9: Intelligence Fusion
+- Layer 10: Homomorphic Intelligence
+- Layer 11: Autonomous Operations
+- Layer 12: Meta-Intelligence
+- Layer 13: Data Formats & Ingestion
+- Layer 14: Swarm Cognition
 """
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"
+__codename__ = "CEREBRUM"
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .brain_interface import DSMILBrain
+
+# Lazy imports to avoid circular dependencies
+def get_brain() -> "DSMILBrain":
+    """Get the singleton brain instance"""
+    from .brain_interface import DSMILBrain
+    return DSMILBrain.get_instance()
+
+__all__ = [
+    "get_brain",
+    "__version__",
+    "__codename__",
+]
+

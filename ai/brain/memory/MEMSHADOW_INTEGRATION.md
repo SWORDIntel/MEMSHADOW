@@ -1,181 +1,214 @@
-# MEMSHADOW Integration for Brain Memory Tiers
+# Memory Tier MEMSHADOW Integration
 
-Complete guide for integrating MEMSHADOW Protocol v2 with Brain memory tiers.
+All memory tiers (L1/L2/L3) support MEMSHADOW protocol v2 for distributed synchronization.
 
-## Memory Tiers
+## Overview
 
-### L1 - Working Memory
-- **Location:** `working_memory.py`
-- **Storage:** RAMDISK (or in-memory)
-- **Capacity:** Limited (default 1000 items)
-- **Embedding Dim:** 256 (compressed for speed)
-- **Eviction:** LRU
-- **Sync Priority:** NORMAL/HIGH
-
-### L2 - Episodic Memory
-- **Location:** `episodic_memory.py`
-- **Storage:** NVMe
-- **Capacity:** 10,000 episodes
-- **Embedding Dim:** 2048 (full resolution)
-- **Organization:** Session/episode-based
-- **Sync Priority:** NORMAL
-
-### L3 - Semantic Memory
-- **Location:** `semantic_memory.py`
-- **Storage:** Cold storage
-- **Capacity:** 100,000 concepts
-- **Embedding Dim:** 4096 (maximum fidelity)
-- **Organization:** Concept/relationship graph
-- **Compression:** Enabled by default
-- **Sync Priority:** LOW/BACKGROUND
+Memory synchronization enables:
+- Cross-node memory sharing
+- Incremental sync (delta updates)
+- Conflict resolution
+- Priority-based replication
+- Automatic tier promotion
 
 ## Sync Protocol
 
 ### MemorySyncItem
 
-Individual memory item for synchronization:
+Single item in a sync operation (48-byte header + payload):
 
 ```python
-from ai.brain.memory import MemorySyncItem, SyncPriority
-
-item = MemorySyncItem.create(
-    payload=b"embedding data",
+item = MemorySyncItem(
+    item_id="32-char-hex-id",
+    timestamp_ns=int(time.time() * 1e9),
     tier=MemoryTier.WORKING,
     operation=SyncOperation.INSERT,
     priority=SyncPriority.NORMAL,
-    source_node="node-001",
+    payload=json.dumps({"data": "value"}).encode()
 )
 ```
-
-Fields:
-- `item_id`: UUID
-- `timestamp_ns`: Nanosecond timestamp
-- `tier`: L1/L2/L3
-- `operation`: INSERT, UPDATE, DELETE, MERGE, REPLICATE
-- `priority`: BACKGROUND, LOW, NORMAL, HIGH, URGENT
-- `payload`: Compressed bytes
 
 ### MemorySyncBatch
 
-Batch of items for efficient transmission:
+Batch of sync items with MEMSHADOW header:
 
 ```python
-from ai.brain.memory import MemorySyncBatch
-
 batch = MemorySyncBatch(
-    source_node="node-001",
-    target_node="hub",
+    batch_id="batch-001",
+    source_node="node-a",
+    target_node="node-b",
     tier=MemoryTier.WORKING,
-    items=[item1, item2, item3],
+    items=[item1, item2, ...]
 )
-
-# Convert to MEMSHADOW message
-msg = batch.to_memshadow_message()
-packed = msg.pack()
 ```
 
-### MemorySyncManager
+### Sync Operations
 
-Central manager for sync operations:
+- `INSERT` - New item
+- `UPDATE` - Modify existing item
+- `DELETE` - Remove item
+- `MERGE` - Merge with existing item
+- `REPLICATE` - Full replication request
+
+### Sync Priorities
+
+- `BACKGROUND` - Low priority sync
+- `LOW` - Standard sync
+- `NORMAL` - Normal priority
+- `HIGH` - Important updates
+- `URGENT` - Critical sync
+
+## Memory Tier Methods
+
+All tiers implement sync protocol methods:
+
+### Working Memory (L1)
 
 ```python
-from ai.brain.memory import MemorySyncManager
+wm = WorkingMemory()
 
-manager = MemorySyncManager(node_id="node-001")
+# Sync protocol methods
+modified = wm.get_modified_since(timestamp_ns)
+item_dict = wm.get_by_id(item_id)
+wm.add(item_id, content_dict)
+wm.update(item_id, content_dict)
+wm.delete(item_id)
+wm.merge(item_id, content_dict)
+```
+
+### Episodic Memory (L2)
+
+Same interface as L1, optimized for episode data.
+
+### Semantic Memory (L3)
+
+Same interface as L1, optimized for knowledge graph nodes.
+
+## Sync Manager
+
+`MemorySyncManager` coordinates synchronization:
+
+```python
+sync_manager = MemorySyncManager(node_id="node-001", mesh=mesh_instance)
 
 # Register memory tiers
-manager.register_memory_tier(MemoryTier.WORKING, working_memory)
-manager.register_memory_tier(MemoryTier.EPISODIC, episodic_memory)
+sync_manager.register_memory_tier(MemoryTier.WORKING, working_memory)
+sync_manager.register_memory_tier(MemoryTier.EPISODIC, episodic_memory)
+sync_manager.register_memory_tier(MemoryTier.SEMANTIC, semantic_memory)
 
 # Create delta batch
-batch = await manager.create_delta_batch(
-    peer_id="node-002",
+batch = sync_manager.create_delta_batch(
     tier=MemoryTier.WORKING,
+    target_node="node-002",
+    since_timestamp=last_sync_timestamp
 )
 
-# Apply incoming batch with conflict resolution
-result = await manager.apply_sync_batch(batch)
+# Apply received batch
+applied, conflicts = sync_manager.apply_sync_batch(batch)
+
+# Sync with peer
+result = await sync_manager.sync_with_peer("node-002", MemoryTier.WORKING)
 ```
 
 ## Conflict Resolution
 
-Default: Last-Write-Wins (LWW)
+Default strategy: **Last-Write-Wins (LWW)**
 
 1. Compare timestamps
-2. If equal, compare node_id lexicographically
-3. Higher timestamp (or node_id) wins
+2. If equal, use node_id as tie-breaker
+3. Log conflicts for analysis
+4. Apply winning version
 
-Alternative strategies:
-- `first_write_wins`
-- `merge` (application-specific)
-- `manual` (requires human review)
+## Delta Sync
 
-## Priority Routing
-
-| Priority | Value | Routing | Use Case |
-|----------|-------|---------|----------|
-| BACKGROUND | 0 | Hub, batched | Bulk sync |
-| LOW | 0 | Hub routing | Non-critical |
-| NORMAL | 1 | Hub routing | Standard ops |
-| HIGH | 2 | Hub priority queue | Important |
-| URGENT | 4 | P2P + hub | Critical updates |
-
-## Performance Targets
-
-- **Batch Size:** 10-100 items (configurable)
-- **Background Sync:** Every 30 seconds
-- **Urgent Sync:** Immediate (<100ms)
-- **Compression:** For batches > 1KB
-
-## Configuration
+Only modified items since last sync are transmitted:
 
 ```python
-from ai.brain.memory import SyncConfig
+# Get items modified since timestamp
+modified = memory_tier.get_modified_since(last_sync_timestamp_ns)
 
-config = SyncConfig(
-    batch_size_min=10,
-    batch_size_max=100,
-    compression_threshold_bytes=1024,
-    background_sync_interval_sec=30.0,
-    urgent_sync_delay_sec=0.1,
-    max_retries=3,
-    conflict_resolution="last_write_wins",
+# Create batch with only changes
+batch = sync_manager.create_delta_batch(
+    tier=MemoryTier.WORKING,
+    target_node="peer-node",
+    since_timestamp=last_sync_timestamp_ns
 )
 ```
 
-## Integration with Federation
+## Sync Vectors
 
-The `SpokeMemoryAdapter` integrates with `SpokeClient`:
+Track last sync timestamp per peer per tier:
 
 ```python
-from ai.brain.federation import SpokeClient, InMemoryTier
+# Get sync vector for tier
+sync_vector = sync_manager.get_sync_vector(MemoryTier.WORKING)
+# Returns: {"node-002": 1234567890, "node-003": 1234567800}
 
-spoke = SpokeClient(node_id="node-001", hub_endpoint="hub:8000")
-
-# Register tiers
-l1 = InMemoryTier(MemoryTier.WORKING)
-spoke.memory_adapter.register_tier(MemoryTier.WORKING, l1)
-
-# Store data (automatically tracked for sync)
-item_id = await spoke.memory_adapter.store(
+# Update after successful sync
+sync_manager.update_sync_vector(
     tier=MemoryTier.WORKING,
-    data=b"important data",
+    node_id="node-002",
+    timestamp=1234567890
 )
+```
 
-# Sync to hub
-await spoke.memory_adapter.sync_to_hub(MemoryTier.WORKING)
+## Compression
+
+Large batches are automatically compressed:
+
+```python
+# Batch > 1KB is compressed with gzip
+if len(items_data) > 1024:
+    items_data = gzip.compress(items_data)
+    batch.flags |= SyncFlags.COMPRESSED
+```
+
+## Integration with Mesh Network
+
+Sync batches are sent via DSMIL-Mesh:
+
+```python
+from messages import MessageTypes
+
+# Send sync batch
+mesh.send(peer_id, MessageTypes.VECTOR_SYNC, batch.pack())
+
+# Receive sync batch
+def handle_sync(data: bytes, peer_id: str):
+    batch = MemorySyncBatch.unpack(data)
+    applied, conflicts = sync_manager.apply_sync_batch(batch)
 ```
 
 ## Testing
 
-Run integration tests:
+Test memory sync:
 
-```bash
-python3 test_memshadow_integration.py
+```python
+from ai.brain.memory.memory_sync_protocol import (
+    MemorySyncItem, MemorySyncBatch, MemoryTier, SyncOperation
+)
+
+# Create test item
+item = MemorySyncItem(...)
+packed = item.pack()
+unpacked, _ = MemorySyncItem.unpack(packed)
+
+# Create batch
+batch = MemorySyncBatch(...)
+packed_batch = batch.pack()
+unpacked_batch = MemorySyncBatch.unpack(packed_batch)
 ```
+
+## Performance Considerations
+
+- **Batch Size:** Optimal 10-100 items per batch
+- **Sync Frequency:** Background sync every 30s, urgent sync immediately
+- **Compression:** Enabled for batches > 1KB
+- **Delta Only:** Only sync modified items since last sync
 
 ## Related Documentation
 
 - [MEMSHADOW Protocol](../../../libs/memshadow-protocol/README.md)
-- [Brain Federation](../federation/README.md)
-- [Hub Integration](../../../HUB_DOCS/MEMSHADOW_INTEGRATION.md)
+- [Working Memory](working_memory.py)
+- [Episodic Memory](episodic_memory.py)
+- [Semantic Memory](semantic_memory.py)

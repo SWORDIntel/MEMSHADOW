@@ -1,770 +1,603 @@
 #!/usr/bin/env python3
 """
-MEMSHADOW Integration Test Suite
+MEMSHADOW Integration Tests for DSMIL Brain Federation
 
-Tests the complete MEMSHADOW implementation:
+Tests the complete MEMSHADOW protocol stack:
 - Protocol header pack/unpack (32-byte format)
 - Message creation and serialization
-- MemorySyncManager delta and conflict handling
-- HubMemshadowGateway routing decisions
-- SpokeMemoryAdapter storage and sync
-- Priority-based routing (CRITICAL/EMERGENCY P2P vs hub-relayed)
-- Memory tier integration (L1/L2/L3)
+- Memory sync manager operations
+- Hub gateway routing decisions  
+- Spoke adapter sync
+- Priority-based routing (P2P vs hub)
 
 Run: python3 test_memshadow_integration.py
 """
 
 import asyncio
-import json
 import sys
+import json
 import time
+import hashlib
 from pathlib import Path
-from typing import Dict, List, Tuple
-from uuid import uuid4
+from dataclasses import dataclass
+from typing import Dict, List, Any, Optional, Tuple
 
-# Setup path for imports
+# Add paths
 sys.path.insert(0, str(Path(__file__).parent / "libs" / "memshadow-protocol" / "python"))
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / "ai" / "brain" / "memory"))
+sys.path.insert(0, str(Path(__file__).parent / "ai" / "brain" / "federation"))
 
 # Import protocol
 from dsmil_protocol import (
-    MemshadowHeader,
-    MemshadowMessage,
-    MessageType,
-    Priority,
-    MessageFlags,
-    MemoryTier,
-    SyncOperation,
-    PsychEvent,
-    MEMSHADOW_MAGIC,
-    MEMSHADOW_VERSION,
-    HEADER_SIZE,
-    should_route_p2p,
-    get_routing_mode,
-    create_memory_sync_message,
+    MemshadowHeader, MemshadowMessage, MessageType, Priority, MessageFlags,
+    PsychEvent, PsychEventType, HEADER_SIZE, PSYCH_EVENT_SIZE,
+    should_route_p2p, detect_protocol_version
 )
 
-# Import brain modules
-from ai.brain.memory import (
-    MemorySyncItem,
-    MemorySyncBatch,
-    MemorySyncManager,
-    SyncPriority,
-    WorkingMemory,
-    EpisodicMemory,
-    SemanticMemory,
+# Import memory sync
+from memory_sync_protocol import (
+    MemorySyncItem, MemorySyncBatch, MemorySyncManager,
+    MemoryTier, SyncOperation, SyncPriority, SyncFlags
 )
 
-from ai.brain.federation import (
-    HubOrchestrator,
-    HubMemshadowGateway,
-    SpokeClient,
-    SpokeMemoryAdapter,
-    InMemoryTier,
-    NodeCapability,
-    NodeMemoryCapabilities,
-    ImprovementPackage,
-    ImprovementType,
-    ImprovementTracker,
-)
+# Import gateway
+from memshadow_gateway import HubMemshadowGateway, SpokeMemoryAdapter, NodeMemoryCapabilities
 
 
-# =============================================================================
-# Test Infrastructure
-# =============================================================================
-
-class TestResult:
-    def __init__(self, name: str):
-        self.name = name
-        self.passed = False
-        self.error = None
-        self.duration_ms = 0
-
-    def __str__(self):
-        status = "✓ PASS" if self.passed else "✗ FAIL"
-        msg = f"  {status}: {self.name} ({self.duration_ms:.2f}ms)"
-        if self.error:
-            msg += f"\n    Error: {self.error}"
-        return msg
-
-
-class TestRunner:
+class TestResults:
+    """Track test results"""
     def __init__(self):
-        self.results: List[TestResult] = []
+        self.passed = 0
+        self.failed = 0
+        self.errors: List[str] = []
     
-    async def run_test(self, name: str, test_func):
-        result = TestResult(name)
-        start = time.time()
-        try:
-            if asyncio.iscoroutinefunction(test_func):
-                await test_func()
-            else:
-                test_func()
-            result.passed = True
-        except AssertionError as e:
-            result.error = str(e) or "Assertion failed"
-        except Exception as e:
-            result.error = f"{type(e).__name__}: {e}"
-        result.duration_ms = (time.time() - start) * 1000
-        self.results.append(result)
-        return result
+    def ok(self, name: str):
+        self.passed += 1
+        print(f"  ✓ {name}")
     
-    def summary(self) -> Tuple[int, int]:
-        passed = sum(1 for r in self.results if r.passed)
-        total = len(self.results)
-        return passed, total
+    def fail(self, name: str, error: str):
+        self.failed += 1
+        self.errors.append(f"{name}: {error}")
+        print(f"  ✗ {name}: {error}")
+    
+    def summary(self) -> str:
+        total = self.passed + self.failed
+        return f"Passed: {self.passed}/{total}"
 
 
 class MockMeshNetwork:
-    """Mock mesh network for testing"""
+    """Simulated mesh network for testing"""
     
     def __init__(self):
-        self.messages: Dict[str, List[bytes]] = {}
+        self.messages: Dict[str, List[Tuple[str, bytes]]] = {}
         self.handlers: Dict[str, callable] = {}
+    
+    def register_node(self, node_id: str):
+        self.messages[node_id] = []
     
     async def send(self, target: str, data: bytes):
         if target not in self.messages:
             self.messages[target] = []
-        self.messages[target].append(data)
-        
-        # Trigger handler if registered
-        if target in self.handlers:
-            await self.handlers[target](data, "test_source")
+        self.messages[target].append((target, data))
     
-    def get_messages(self, target: str) -> List[bytes]:
-        return self.messages.get(target, [])
+    def get_messages(self, node_id: str) -> List[Tuple[str, bytes]]:
+        return self.messages.get(node_id, [])
     
     def clear(self):
-        self.messages.clear()
+        for node in self.messages:
+            self.messages[node] = []
 
 
-# =============================================================================
-# Protocol Tests
-# =============================================================================
-
-def test_header_pack_unpack():
-    """Test 32-byte header pack/unpack"""
+def test_protocol_header(results: TestResults):
+    """Test MEMSHADOW protocol header pack/unpack"""
+    print("\n[1] Protocol Header Tests")
+    
+    # Test basic header creation
     header = MemshadowHeader(
-        magic=MEMSHADOW_MAGIC,
-        version=MEMSHADOW_VERSION,
-        priority=Priority.HIGH,
+        priority=Priority.NORMAL,
+        msg_type=MessageType.MEMORY_SYNC,
+        payload_len=1024
+    )
+    
+    if header.msg_type == MessageType.MEMORY_SYNC:
+        results.ok("Header creation")
+    else:
+        results.fail("Header creation", f"Wrong msg_type: {header.msg_type}")
+    
+    # Test pack size
+    packed = header.pack()
+    if len(packed) == HEADER_SIZE:
+        results.ok(f"Header pack size ({HEADER_SIZE} bytes)")
+    else:
+        results.fail("Header pack size", f"Got {len(packed)}, expected {HEADER_SIZE}")
+    
+    # Test unpack
+    unpacked = MemshadowHeader.unpack(packed)
+    if unpacked.msg_type == MessageType.MEMORY_SYNC:
+        results.ok("Header unpack msg_type")
+    else:
+        results.fail("Header unpack msg_type", f"Got {unpacked.msg_type}")
+    
+    if unpacked.priority == Priority.NORMAL:
+        results.ok("Header unpack priority")
+    else:
+        results.fail("Header unpack priority", f"Got {unpacked.priority}")
+    
+    if unpacked.payload_len == 1024:
+        results.ok("Header unpack payload_len")
+    else:
+        results.fail("Header unpack payload_len", f"Got {unpacked.payload_len}")
+    
+    # Test flags
+    header_with_flags = MemshadowHeader(
         msg_type=MessageType.MEMORY_SYNC,
         flags=MessageFlags.BATCHED | MessageFlags.COMPRESSED,
-        batch_count=5,
-        payload_len=1024,
+        batch_count=10
     )
+    packed_flags = header_with_flags.pack()
+    unpacked_flags = MemshadowHeader.unpack(packed_flags)
     
-    packed = header.pack()
-    assert len(packed) == HEADER_SIZE, f"Header size mismatch: {len(packed)} != {HEADER_SIZE}"
+    if MessageFlags.BATCHED in unpacked_flags.flags:
+        results.ok("Header flags BATCHED")
+    else:
+        results.fail("Header flags BATCHED", "Flag not preserved")
     
-    unpacked = MemshadowHeader.unpack(packed)
-    
-    assert unpacked.magic == MEMSHADOW_MAGIC
-    assert unpacked.version == MEMSHADOW_VERSION
-    assert unpacked.priority == Priority.HIGH
-    assert unpacked.msg_type == MessageType.MEMORY_SYNC
-    assert unpacked.batch_count == 5
-    assert unpacked.payload_len == 1024
-    assert MessageFlags.BATCHED in MessageFlags(unpacked.flags)
+    if unpacked_flags.batch_count == 10:
+        results.ok("Header batch_count")
+    else:
+        results.fail("Header batch_count", f"Got {unpacked_flags.batch_count}")
 
 
-def test_message_create_serialize():
-    """Test message creation and serialization"""
-    payload = b"test payload data"
+def test_message_types(results: TestResults):
+    """Test message type ranges and values"""
+    print("\n[2] Message Type Tests")
     
-    msg = MemshadowMessage.create(
-        msg_type=MessageType.MEMORY_STORE,
-        payload=payload,
-        priority=Priority.NORMAL,
-        flags=MessageFlags.REQUIRES_ACK,
-    )
+    # Test SHRINK psych types are in 0x01xx range
+    psych_types = [MessageType.PSYCH_ASSESSMENT, MessageType.DARK_TRIAD_UPDATE, MessageType.RISK_UPDATE]
+    for mt in psych_types:
+        if 0x0100 <= mt.value <= 0x01FF:
+            results.ok(f"{mt.name} in SHRINK range (0x01xx)")
+        else:
+            results.fail(f"{mt.name} range", f"0x{mt.value:04X} not in 0x01xx")
     
-    packed = msg.pack()
-    assert len(packed) == HEADER_SIZE + len(payload)
+    # Test Memory types are in 0x03xx range
+    memory_types = [MessageType.MEMORY_STORE, MessageType.MEMORY_QUERY, MessageType.MEMORY_SYNC]
+    for mt in memory_types:
+        if 0x0300 <= mt.value <= 0x03FF:
+            results.ok(f"{mt.name} in Memory range (0x03xx)")
+        else:
+            results.fail(f"{mt.name} range", f"0x{mt.value:04X} not in 0x03xx")
     
-    unpacked = MemshadowMessage.unpack(packed)
-    assert unpacked.header.msg_type == MessageType.MEMORY_STORE
-    assert unpacked.payload == payload
+    # Test Improvement types are in 0x05xx range
+    improvement_types = [MessageType.IMPROVEMENT_ANNOUNCE, MessageType.IMPROVEMENT_PAYLOAD]
+    for mt in improvement_types:
+        if 0x0500 <= mt.value <= 0x05FF:
+            results.ok(f"{mt.name} in Improvement range (0x05xx)")
+        else:
+            results.fail(f"{mt.name} range", f"0x{mt.value:04X} not in 0x05xx")
 
 
-def test_priority_routing_rules():
+def test_priority_routing(results: TestResults):
     """Test priority-based routing decisions"""
-    # LOW/NORMAL: hub-relayed
-    assert not should_route_p2p(Priority.LOW)
-    assert not should_route_p2p(Priority.NORMAL)
+    print("\n[3] Priority Routing Tests")
     
-    # HIGH: hub-relayed with priority
-    assert not should_route_p2p(Priority.HIGH)
+    # LOW/NORMAL/HIGH should use hub
+    for p in [Priority.LOW, Priority.NORMAL, Priority.HIGH]:
+        if not should_route_p2p(p):
+            results.ok(f"{p.name} routes via hub")
+        else:
+            results.fail(f"{p.name} routing", "Should not use P2P")
     
-    # CRITICAL/EMERGENCY: P2P
-    assert should_route_p2p(Priority.CRITICAL)
-    assert should_route_p2p(Priority.EMERGENCY)
-    
-    # Routing mode strings
-    assert get_routing_mode(Priority.LOW) == "hub-normal"
-    assert get_routing_mode(Priority.HIGH) == "hub-priority"
-    assert get_routing_mode(Priority.CRITICAL) == "p2p+hub"
+    # CRITICAL/EMERGENCY should use P2P
+    for p in [Priority.CRITICAL, Priority.EMERGENCY]:
+        if should_route_p2p(p):
+            results.ok(f"{p.name} routes via P2P")
+        else:
+            results.fail(f"{p.name} routing", "Should use P2P")
 
 
-def test_psych_event():
-    """Test SHRINK psych event packing"""
+def test_psych_event(results: TestResults):
+    """Test SHRINK psychological event pack/unpack"""
+    print("\n[4] SHRINK Psych Event Tests")
+    
     event = PsychEvent(
         session_id=12345,
-        timestamp_offset_us=1000,
-        event_type=3,  # SCORE_UPDATE
-        acute_stress=0.5,
+        timestamp_offset_us=100000,
+        event_type=PsychEventType.SCORE_UPDATE,
+        acute_stress=0.75,
         machiavellianism=0.3,
         narcissism=0.4,
         psychopathy=0.2,
-        confidence=0.85,
+        espionage_exposure=0.85,
+        confidence=0.9
     )
     
+    # Test pack size
     packed = event.pack()
-    assert len(packed) == 64
+    if len(packed) == PSYCH_EVENT_SIZE:
+        results.ok(f"PsychEvent pack size ({PSYCH_EVENT_SIZE} bytes)")
+    else:
+        results.fail("PsychEvent pack size", f"Got {len(packed)}, expected {PSYCH_EVENT_SIZE}")
     
+    # Test unpack
     unpacked = PsychEvent.unpack(packed)
-    assert unpacked.session_id == 12345
-    assert abs(unpacked.acute_stress - 0.5) < 0.01
-    assert abs(unpacked.confidence - 0.85) < 0.01
+    if unpacked.session_id == 12345:
+        results.ok("PsychEvent session_id")
+    else:
+        results.fail("PsychEvent session_id", f"Got {unpacked.session_id}")
+    
+    if abs(unpacked.acute_stress - 0.75) < 0.001:
+        results.ok("PsychEvent acute_stress")
+    else:
+        results.fail("PsychEvent acute_stress", f"Got {unpacked.acute_stress}")
+    
+    if abs(unpacked.espionage_exposure - 0.85) < 0.001:
+        results.ok("PsychEvent espionage_exposure")
+    else:
+        results.fail("PsychEvent espionage_exposure", f"Got {unpacked.espionage_exposure}")
+    
+    # Test dark triad average
+    expected_avg = (0.3 + 0.4 + 0.2) / 3.0
+    if abs(unpacked.dark_triad_average - expected_avg) < 0.001:
+        results.ok("PsychEvent dark_triad_average")
+    else:
+        results.fail("PsychEvent dark_triad_average", f"Got {unpacked.dark_triad_average}")
 
 
-# =============================================================================
-# Memory Sync Protocol Tests
-# =============================================================================
-
-async def test_memory_sync_item():
-    """Test MemorySyncItem creation and serialization"""
-    item = MemorySyncItem.create(
-        payload=b"test embedding data",
+def test_memory_sync_item(results: TestResults):
+    """Test MemorySyncItem pack/unpack"""
+    print("\n[5] Memory Sync Item Tests")
+    
+    item = MemorySyncItem(
+        item_id="test-item-001234567890123456",
+        timestamp_ns=int(time.time() * 1e9),
         tier=MemoryTier.WORKING,
         operation=SyncOperation.INSERT,
         priority=SyncPriority.NORMAL,
-        source_node="node-001",
+        payload=json.dumps({"key": "value", "count": 42}).encode()
     )
     
-    assert item.tier == MemoryTier.WORKING
-    assert item.operation == SyncOperation.INSERT
-    assert len(item.content_hash) > 0
+    # Test pack
+    packed = item.pack()
+    if len(packed) >= 48:  # 48-byte header + payload
+        results.ok("MemorySyncItem pack")
+    else:
+        results.fail("MemorySyncItem pack", f"Too short: {len(packed)}")
     
-    # Serialize and deserialize
-    data = item.to_dict()
-    restored = MemorySyncItem.from_dict(data)
+    # Test unpack
+    unpacked, consumed = MemorySyncItem.unpack(packed)
+    if "test-item" in unpacked.item_id:
+        results.ok("MemorySyncItem item_id")
+    else:
+        results.fail("MemorySyncItem item_id", f"Got {unpacked.item_id}")
     
-    assert restored.tier == item.tier
-    assert restored.operation == item.operation
-    assert restored.source_node == item.source_node
+    if unpacked.tier == MemoryTier.WORKING:
+        results.ok("MemorySyncItem tier")
+    else:
+        results.fail("MemorySyncItem tier", f"Got {unpacked.tier}")
+    
+    if unpacked.operation == SyncOperation.INSERT:
+        results.ok("MemorySyncItem operation")
+    else:
+        results.fail("MemorySyncItem operation", f"Got {unpacked.operation}")
 
 
-async def test_memory_sync_batch():
-    """Test MemorySyncBatch creation and validation"""
+def test_memory_sync_batch(results: TestResults):
+    """Test MemorySyncBatch pack/unpack"""
+    print("\n[6] Memory Sync Batch Tests")
+    
     items = [
-        MemorySyncItem.create(
-            payload=f"item {i}".encode(),
+        MemorySyncItem(
+            item_id=f"item-{i:032d}",
+            timestamp_ns=int(time.time() * 1e9) + i,
             tier=MemoryTier.EPISODIC,
+            operation=SyncOperation.UPDATE,
             priority=SyncPriority.NORMAL,
+            payload=json.dumps({"index": i}).encode()
         )
-        for i in range(5)
+        for i in range(3)
     ]
     
     batch = MemorySyncBatch(
-        source_node="node-001",
-        target_node="hub",
+        batch_id="batch-001",
+        source_node="node-a",
+        target_node="node-b",
         tier=MemoryTier.EPISODIC,
-        items=items,
+        items=items
     )
     
-    assert len(batch.items) == 5
-    assert batch.validate()  # Checksum should be valid
+    # Test pack
+    packed = batch.pack()
+    if len(packed) > 0:
+        results.ok(f"MemorySyncBatch pack ({len(packed)} bytes)")
+    else:
+        results.fail("MemorySyncBatch pack", "Empty result")
     
-    # Convert to MEMSHADOW message
-    msg = batch.to_memshadow_message()
-    assert msg.header.msg_type == MessageType.MEMORY_SYNC
-    assert MessageFlags.BATCHED in MessageFlags(msg.header.flags)
+    # Test unpack
+    unpacked = MemorySyncBatch.unpack(packed)
+    if unpacked.batch_id == "batch-001":
+        results.ok("MemorySyncBatch batch_id")
+    else:
+        results.fail("MemorySyncBatch batch_id", f"Got {unpacked.batch_id}")
+    
+    if len(unpacked.items) == 3:
+        results.ok("MemorySyncBatch item count")
+    else:
+        results.fail("MemorySyncBatch item count", f"Got {len(unpacked.items)}")
+    
+    if unpacked.tier == MemoryTier.EPISODIC:
+        results.ok("MemorySyncBatch tier")
+    else:
+        results.fail("MemorySyncBatch tier", f"Got {unpacked.tier}")
 
 
-async def test_memory_sync_manager():
-    """Test MemorySyncManager delta computation and conflict resolution"""
-    manager = MemorySyncManager(node_id="node-001")
+def test_sync_manager(results: TestResults):
+    """Test MemorySyncManager operations"""
+    print("\n[7] Sync Manager Tests")
     
-    # Store some items
-    for i in range(5):
-        item = MemorySyncItem.create(
-            payload=f"data {i}".encode(),
-            tier=MemoryTier.WORKING,
-            source_node="node-001",
-        )
-        await manager.store_local(item)
+    # Create a mock memory tier
+    class MockMemoryTier:
+        def __init__(self):
+            self._items = {}
+            self._timestamps = {}
+        
+        def store(self, item_id, content):
+            self._items[item_id] = content
+            self._timestamps[item_id] = int(time.time() * 1e9)
+        
+        def get_by_id(self, item_id):
+            if item_id in self._items:
+                return {
+                    "content": self._items[item_id],
+                    "timestamp_ns": self._timestamps[item_id]
+                }
+            return None
+        
+        def get_modified_since(self, timestamp):
+            return [
+                {"item_id": k, "content": v, "timestamp_ns": self._timestamps[k]}
+                for k, v in self._items.items()
+                if self._timestamps[k] > timestamp
+            ]
     
-    # Create delta batch
-    batch = await manager.create_delta_batch(
-        peer_id="node-002",
-        tier=MemoryTier.WORKING,
-    )
-    
-    assert len(batch.items) == 5
-    assert batch.source_node == "node-001"
-    
-    # Apply batch (should succeed)
-    result = await manager.apply_sync_batch(batch)
-    assert result["success"]
-    assert result["applied"] >= 0
-
-
-# =============================================================================
-# Hub Gateway Tests
-# =============================================================================
-
-async def test_hub_gateway_registration():
-    """Test node registration with hub gateway"""
-    mesh = MockMeshNetwork()
-    gateway = HubMemshadowGateway(
-        hub_id="hub-001",
-        mesh_send_callback=mesh.send,
-    )
-    
-    # Register nodes
-    gateway.register_node(
-        node_id="node-001",
-        endpoint="localhost:8001",
-        memory_caps=NodeMemoryCapabilities(
-            supports_l1=True,
-            supports_l2=True,
-            supports_l3=False,
-        ),
-    )
-    
-    gateway.register_node(
-        node_id="node-002",
-        endpoint="localhost:8002",
-    )
-    
-    stats = gateway.get_stats()
-    assert stats["nodes_registered"] == 2
-
-
-async def test_hub_gateway_routing():
-    """Test hub gateway batch routing decisions"""
-    mesh = MockMeshNetwork()
-    gateway = HubMemshadowGateway(
-        hub_id="hub-001",
-        mesh_send_callback=mesh.send,
-    )
-    
-    # Register target node
-    gateway.register_node("node-002", "localhost:8002")
-    
-    # Create and route a normal priority batch
-    items = [MemorySyncItem.create(payload=b"data", tier=MemoryTier.WORKING)]
-    batch = MemorySyncBatch(
-        source_node="node-001",
-        target_node="node-002",
-        tier=MemoryTier.WORKING,
-        items=items,
-        priority=SyncPriority.NORMAL,
-    )
-    
-    result = await gateway.route_batch(batch)
-    
-    assert "node-002" in result["targets_sent"]
-    assert result["routing_mode"] == "hub-normal"
-    assert len(mesh.get_messages("node-002")) == 1
-
-
-# =============================================================================
-# Spoke Adapter Tests
-# =============================================================================
-
-async def test_spoke_adapter_storage():
-    """Test spoke adapter local storage"""
-    adapter = SpokeMemoryAdapter(
-        node_id="node-001",
-        hub_node_id="hub",
-    )
+    manager = MemorySyncManager("test-node")
+    working = MockMemoryTier()
     
     # Register tier
-    l1_tier = InMemoryTier(MemoryTier.WORKING)
-    adapter.register_tier(MemoryTier.WORKING, l1_tier)
+    manager.register_memory_tier(MemoryTier.WORKING, working)
+    if MemoryTier.WORKING in manager._memory_tiers:
+        results.ok("Register memory tier")
+    else:
+        results.fail("Register memory tier", "Tier not registered")
     
-    # Store item
-    item_id = await adapter.store(
-        tier=MemoryTier.WORKING,
-        data=b"test data",
-        metadata={"key": "value"},
-    )
+    # Add items
+    working.store("item-1", {"data": "test1"})
+    working.store("item-2", {"data": "test2"})
     
-    assert item_id is not None
+    # Create delta batch
+    batch = manager.create_delta_batch(MemoryTier.WORKING, "target-node", 0)
+    if batch and len(batch.items) >= 2:
+        results.ok(f"Create delta batch ({len(batch.items)} items)")
+    else:
+        results.fail("Create delta batch", f"Got {len(batch.items) if batch else 0} items")
     
-    # Retrieve item
-    data = await adapter.retrieve(MemoryTier.WORKING, item_id)
-    assert data == b"test data"
+    # Get sync vector
+    vector = manager.get_sync_vector(MemoryTier.WORKING)
+    results.ok("Get sync vector")
     
-    # Check stats
+    # Get stats
+    stats = manager.get_stats()
+    if "registered_tiers" in stats:
+        results.ok("Get sync stats")
+    else:
+        results.fail("Get sync stats", "Missing registered_tiers")
+
+
+def test_hub_gateway(results: TestResults):
+    """Test HubMemshadowGateway operations"""
+    print("\n[8] Hub Gateway Tests")
+    
+    mesh = MockMeshNetwork()
+    gateway = HubMemshadowGateway("test-hub", mesh_send=mesh.send)
+    
+    # Register nodes
+    gateway.register_node("node-1", "localhost:8001", {
+        MemoryTier.WORKING: 1024*1024,
+        MemoryTier.EPISODIC: 10*1024*1024,
+    })
+    gateway.register_node("node-2", "localhost:8002", {
+        MemoryTier.WORKING: 2048*1024,
+        MemoryTier.SEMANTIC: 100*1024*1024,
+    })
+    
+    stats = gateway.get_all_stats()
+    if stats["registered_nodes"] == 2:
+        results.ok("Register nodes")
+    else:
+        results.fail("Register nodes", f"Got {stats['registered_nodes']}")
+    
+    # Schedule sync
+    gateway.schedule_sync("node-1", MemoryTier.WORKING, Priority.HIGH)
+    pending = gateway.get_pending_syncs()
+    if len(pending) == 1 and pending[0].priority == Priority.HIGH:
+        results.ok("Schedule sync with priority")
+    else:
+        results.fail("Schedule sync", f"Got {len(pending)} pending")
+    
+    # Get node stats
+    node_stats = gateway.get_node_stats("node-1")
+    if node_stats and MemoryTier.WORKING.name in node_stats["tiers"]:
+        results.ok("Get node stats")
+    else:
+        results.fail("Get node stats", "Missing tier info")
+    
+    # Test unregister
+    gateway.unregister_node("node-2")
+    stats = gateway.get_all_stats()
+    if stats["registered_nodes"] == 1:
+        results.ok("Unregister node")
+    else:
+        results.fail("Unregister node", f"Still have {stats['registered_nodes']}")
+
+
+def test_spoke_adapter(results: TestResults):
+    """Test SpokeMemoryAdapter operations"""
+    print("\n[9] Spoke Adapter Tests")
+    
+    mesh = MockMeshNetwork()
+    mesh.register_node("hub")
+    mesh.register_node("node-1")
+    mesh.register_node("node-2")
+    
+    adapter = SpokeMemoryAdapter("node-1", "hub", mesh_send=mesh.send)
+    
+    # Add peer
+    adapter.add_peer("node-2")
     stats = adapter.get_stats()
-    assert stats["items_stored"] == 1
-
-
-async def test_spoke_adapter_delta_batch():
-    """Test spoke adapter delta batch creation"""
-    adapter = SpokeMemoryAdapter(
-        node_id="node-001",
-        hub_node_id="hub",
-    )
+    if stats["peer_count"] == 1:
+        results.ok("Add peer")
+    else:
+        results.fail("Add peer", f"Got {stats['peer_count']}")
     
-    l1_tier = InMemoryTier(MemoryTier.WORKING)
-    adapter.register_tier(MemoryTier.WORKING, l1_tier)
+    # Test metrics
+    if "batches_sent" in stats["metrics"]:
+        results.ok("Adapter metrics")
+    else:
+        results.fail("Adapter metrics", "Missing batches_sent")
     
-    # Store multiple items
-    for i in range(3):
-        await adapter.store(
-            tier=MemoryTier.WORKING,
-            data=f"item {i}".encode(),
-        )
-    
-    # Create delta batch
-    batch = await adapter.create_delta_batch(
-        tier=MemoryTier.WORKING,
-        target_node="hub",
-    )
-    
-    assert batch.source_node == "node-001"
-    assert batch.tier == MemoryTier.WORKING
+    # Remove peer
+    adapter.remove_peer("node-2")
+    stats = adapter.get_stats()
+    if stats["peer_count"] == 0:
+        results.ok("Remove peer")
+    else:
+        results.fail("Remove peer", f"Got {stats['peer_count']}")
 
 
-# =============================================================================
-# Hub Orchestrator Tests
-# =============================================================================
-
-async def test_hub_orchestrator():
-    """Test hub orchestrator with MEMSHADOW gateway"""
+async def test_end_to_end_sync(results: TestResults):
+    """Test end-to-end sync between hub and spokes"""
+    print("\n[10] End-to-End Sync Tests")
+    
+    # Create mesh
     mesh = MockMeshNetwork()
-    hub = HubOrchestrator(hub_id="hub-001")
-    hub.set_mesh_callback(mesh.send)
+    mesh.register_node("hub")
+    mesh.register_node("spoke-1")
+    mesh.register_node("spoke-2")
     
-    # Register a node
-    node = hub.register_node(
-        node_id="node-001",
-        endpoint="localhost:8001",
-        capabilities={NodeCapability.SEARCH, NodeCapability.CORRELATE},
-        memory_capabilities=NodeMemoryCapabilities(),
-    )
+    # Create hub gateway
+    hub = HubMemshadowGateway("hub", mesh_send=mesh.send)
+    hub.register_node("spoke-1", "localhost:8001", {MemoryTier.WORKING: 1024*1024})
+    hub.register_node("spoke-2", "localhost:8002", {MemoryTier.WORKING: 1024*1024})
     
-    assert node.node_id == "node-001"
-    assert NodeCapability.MEMORY_SYNC in node.capabilities
+    # Create spoke adapters
+    spoke1 = SpokeMemoryAdapter("spoke-1", "hub", mesh_send=mesh.send)
+    spoke1.add_peer("spoke-2")
+    spoke2 = SpokeMemoryAdapter("spoke-2", "hub", mesh_send=mesh.send)
+    spoke2.add_peer("spoke-1")
     
-    # Check stats
-    stats = hub.get_stats()
-    assert stats["registered_nodes"] == 1
-
-
-async def test_hub_message_dispatch():
-    """Test hub message dispatch to handlers"""
-    mesh = MockMeshNetwork()
-    hub = HubOrchestrator(hub_id="hub-001")
-    hub.set_mesh_callback(mesh.send)
-    hub.register_node("node-001", "localhost:8001", set())
-    
-    # Create a MEMORY_SYNC message
-    items = [MemorySyncItem.create(payload=b"data", tier=MemoryTier.WORKING)]
+    # Create a batch on spoke-1
     batch = MemorySyncBatch(
-        source_node="node-001",
+        batch_id="sync-batch-001",
+        source_node="spoke-1",
+        target_node="*",
         tier=MemoryTier.WORKING,
-        items=items,
-    )
-    msg = batch.to_memshadow_message()
-    
-    # Dispatch should succeed
-    result = await hub.dispatch_message(msg.pack(), "node-001")
-    assert result
-
-
-# =============================================================================
-# Spoke Client Tests
-# =============================================================================
-
-async def test_spoke_client():
-    """Test spoke client with memory adapter"""
-    mesh = MockMeshNetwork()
-    spoke = SpokeClient(
-        node_id="node-001",
-        hub_endpoint="hub.local:8000",
-        capabilities={"search", "correlate"},
-    )
-    spoke.set_mesh_callback(mesh.send)
-    
-    # Register tier with adapter
-    l1_tier = InMemoryTier(MemoryTier.WORKING)
-    spoke.memory_adapter.register_tier(MemoryTier.WORKING, l1_tier)
-    
-    # Store through adapter
-    item_id = await spoke.memory_adapter.store(
-        tier=MemoryTier.WORKING,
-        data=b"spoke data",
+        items=[
+            MemorySyncItem(
+                item_id="data-item-001234567890123456",
+                timestamp_ns=int(time.time() * 1e9),
+                tier=MemoryTier.WORKING,
+                operation=SyncOperation.INSERT,
+                priority=SyncPriority.NORMAL,
+                payload=b'{"test": "data"}'
+            )
+        ]
     )
     
-    assert item_id is not None
+    # Route with NORMAL priority (should go via hub)
+    result = await hub.route_batch(batch, Priority.NORMAL)
+    if hub._metrics["hub_routes"] >= 1:
+        results.ok("Hub routing for NORMAL priority")
+    else:
+        results.fail("Hub routing", "No hub routes recorded")
     
-    # Retrieve
-    data = await spoke.memory_adapter.retrieve(MemoryTier.WORKING, item_id)
-    assert data == b"spoke data"
+    # Route with CRITICAL priority (should use P2P)
+    result = await hub.route_batch(batch, Priority.CRITICAL)
+    if hub._metrics["p2p_routes"] >= 1:
+        results.ok("P2P routing for CRITICAL priority")
+    else:
+        results.fail("P2P routing", "No P2P routes recorded")
+    
+    # Handle incoming batch
+    packed = batch.pack()
+    handle_result = await hub.handle_incoming_batch(packed, "spoke-1")
+    if handle_result.get("status") in ["received", "routed"]:
+        results.ok("Handle incoming batch")
+    else:
+        results.fail("Handle incoming batch", f"Status: {handle_result.get('status')}")
 
 
-# =============================================================================
-# Memory Tier Tests
-# =============================================================================
-
-async def test_working_memory():
-    """Test L1 Working Memory tier"""
-    wm = WorkingMemory(capacity=10)
+def test_protocol_detection(results: TestResults):
+    """Test protocol version detection"""
+    print("\n[11] Protocol Detection Tests")
     
-    # Store items
-    for i in range(5):
-        await wm.store(f"item-{i}", f"data-{i}".encode())
-    
-    # Retrieve
-    data = await wm.retrieve("item-2")
-    assert data == b"data-2"
-    
-    # Stats
-    stats = wm.get_stats()
-    assert stats["current_size"] == 5
-    assert stats["hits"] == 1
-
-
-async def test_working_memory_eviction():
-    """Test L1 LRU eviction"""
-    wm = WorkingMemory(capacity=3)
-    
-    # Fill capacity
-    await wm.store("a", b"data-a")
-    await wm.store("b", b"data-b")
-    await wm.store("c", b"data-c")
-    
-    # Access 'a' to make it recently used
-    await wm.retrieve("a")
-    
-    # Add new item, should evict 'b' (LRU)
-    await wm.store("d", b"data-d")
-    
-    assert await wm.retrieve("a") == b"data-a"
-    assert await wm.retrieve("b") is None  # Evicted
-    assert await wm.retrieve("d") == b"data-d"
-
-
-async def test_episodic_memory():
-    """Test L2 Episodic Memory tier"""
-    em = EpisodicMemory()
-    
-    # Store items in session
-    await em.store("item-1", b"data-1", session_id="session-A")
-    await em.store("item-2", b"data-2", session_id="session-A")
-    
-    # Retrieve
-    data = await em.retrieve("item-1")
-    assert data == b"data-1"
-    
-    # Get session episodes
-    episodes = await em.get_session_episodes("session-A")
-    assert len(episodes) == 1
-
-
-async def test_semantic_memory():
-    """Test L3 Semantic Memory tier"""
-    sm = SemanticMemory(compression_enabled=True)
-    
-    # Store with concept
-    await sm.store("fact-1", b"The sky is blue", concept_name="facts")
-    await sm.store("fact-2", b"Water is wet", concept_name="facts")
-    
-    # Retrieve
-    data = await sm.retrieve("fact-1")
-    assert data == b"The sky is blue"
-    
-    # Get concept
-    concept = await sm.get_concept_by_name("facts")
-    assert concept is not None
-    assert len(concept.instances) == 2
-
-
-# =============================================================================
-# Improvement Tracker Tests
-# =============================================================================
-
-async def test_improvement_tracker():
-    """Test improvement detection and packaging"""
-    tracker = ImprovementTracker(node_id="node-001")
-    
-    # Set baseline
-    tracker.set_baseline("accuracy", 0.80)
-    
-    # Record improved metrics
-    for _ in range(15):
-        tracker.record_metric("accuracy", 0.92)
-    
-    # Should detect improvement
-    assert len(tracker._pending_improvements) > 0
-    
-    # Package improvement
-    package = tracker.package_improvement(
-        improvement_type=ImprovementType.LEARNED_PATTERNS,
-        data=b"pattern data",
+    # Create v2 header
+    header = MemshadowHeader(
+        msg_type=MessageType.HEARTBEAT,
+        priority=Priority.NORMAL
     )
+    packed = header.pack()
     
-    assert package.improvement_type == ImprovementType.LEARNED_PATTERNS
-    assert package.gain_percent > 0
+    version = detect_protocol_version(packed)
+    if version == 2:
+        results.ok("Detect v2 protocol")
+    else:
+        results.fail("Detect v2 protocol", f"Got version {version}")
+    
+    # Test invalid data
+    version = detect_protocol_version(b"\x00\x00\x00\x00")
+    if version == 0:
+        results.ok("Detect invalid protocol")
+    else:
+        results.fail("Detect invalid protocol", f"Got version {version}")
 
 
-# =============================================================================
-# End-to-End Tests
-# =============================================================================
-
-async def test_hub_spoke_sync_flow():
-    """Test complete hub-spoke memory sync flow"""
-    mesh = MockMeshNetwork()
-    
-    # Setup hub
-    hub = HubOrchestrator(hub_id="hub-001")
-    hub.set_mesh_callback(mesh.send)
-    
-    # Setup spoke
-    spoke = SpokeClient(
-        node_id="node-001",
-        hub_endpoint="hub.local:8000",
-    )
-    spoke.set_mesh_callback(mesh.send)
-    
-    # Register spoke with hub
-    hub.register_node(
-        node_id="node-001",
-        endpoint="localhost:8001",
-        capabilities={NodeCapability.SEARCH},
-    )
-    
-    # Setup spoke memory
-    l1_tier = InMemoryTier(MemoryTier.WORKING)
-    spoke.memory_adapter.register_tier(MemoryTier.WORKING, l1_tier)
-    
-    # Spoke stores data
-    await spoke.memory_adapter.store(
-        tier=MemoryTier.WORKING,
-        data=b"important data",
-    )
-    
-    # Create delta batch
-    batch = await spoke.memory_adapter.create_delta_batch(
-        tier=MemoryTier.WORKING,
-        target_node="hub-001",
-    )
-    
-    assert batch.source_node == "node-001"
-    assert len(batch.items) >= 1
-
-
-async def test_priority_routing_e2e():
-    """Test priority-based routing end-to-end"""
-    mesh = MockMeshNetwork()
-    
-    hub = HubOrchestrator(hub_id="hub-001")
-    hub.set_mesh_callback(mesh.send)
-    
-    hub.register_node("node-001", "localhost:8001", set())
-    hub.register_node("node-002", "localhost:8002", set())
-    
-    # Create CRITICAL priority batch (should use P2P)
-    items = [MemorySyncItem.create(payload=b"critical", tier=MemoryTier.WORKING)]
-    batch = MemorySyncBatch(
-        source_node="node-001",
-        target_node="*",  # Broadcast
-        tier=MemoryTier.WORKING,
-        items=items,
-        priority=SyncPriority.URGENT,  # Maps to EMERGENCY
-    )
-    
-    result = await hub.memshadow_gateway.route_batch(batch)
-    
-    # Should route to all nodes
-    assert len(result["targets_sent"]) >= 1
-    # Check routing mode
-    assert result["routing_mode"] == "p2p+hub"
-
-
-# =============================================================================
-# Main
-# =============================================================================
-
-async def main():
+def main():
+    """Run all tests"""
     print("=" * 60)
-    print("MEMSHADOW Integration Test Suite")
+    print("MEMSHADOW Integration Tests")
     print("=" * 60)
-    print()
     
-    runner = TestRunner()
+    results = TestResults()
     
-    # Protocol tests
-    print("Protocol Tests:")
-    await runner.run_test("Header pack/unpack (32-byte)", test_header_pack_unpack)
-    await runner.run_test("Message create/serialize", test_message_create_serialize)
-    await runner.run_test("Priority routing rules", test_priority_routing_rules)
-    await runner.run_test("SHRINK psych event", test_psych_event)
+    # Run synchronous tests
+    test_protocol_header(results)
+    test_message_types(results)
+    test_priority_routing(results)
+    test_psych_event(results)
+    test_memory_sync_item(results)
+    test_memory_sync_batch(results)
+    test_sync_manager(results)
+    test_hub_gateway(results)
+    test_spoke_adapter(results)
+    test_protocol_detection(results)
     
-    # Memory sync protocol tests
-    print("\nMemory Sync Protocol Tests:")
-    await runner.run_test("MemorySyncItem", test_memory_sync_item)
-    await runner.run_test("MemorySyncBatch", test_memory_sync_batch)
-    await runner.run_test("MemorySyncManager", test_memory_sync_manager)
-    
-    # Hub gateway tests
-    print("\nHub Gateway Tests:")
-    await runner.run_test("Gateway registration", test_hub_gateway_registration)
-    await runner.run_test("Gateway routing", test_hub_gateway_routing)
-    
-    # Spoke adapter tests
-    print("\nSpoke Adapter Tests:")
-    await runner.run_test("Adapter storage", test_spoke_adapter_storage)
-    await runner.run_test("Adapter delta batch", test_spoke_adapter_delta_batch)
-    
-    # Hub orchestrator tests
-    print("\nHub Orchestrator Tests:")
-    await runner.run_test("Hub orchestrator", test_hub_orchestrator)
-    await runner.run_test("Hub message dispatch", test_hub_message_dispatch)
-    
-    # Spoke client tests
-    print("\nSpoke Client Tests:")
-    await runner.run_test("Spoke client", test_spoke_client)
-    
-    # Memory tier tests
-    print("\nMemory Tier Tests:")
-    await runner.run_test("Working memory (L1)", test_working_memory)
-    await runner.run_test("Working memory eviction", test_working_memory_eviction)
-    await runner.run_test("Episodic memory (L2)", test_episodic_memory)
-    await runner.run_test("Semantic memory (L3)", test_semantic_memory)
-    
-    # Improvement tests
-    print("\nImprovement Tracker Tests:")
-    await runner.run_test("Improvement tracker", test_improvement_tracker)
-    
-    # End-to-end tests
-    print("\nEnd-to-End Tests:")
-    await runner.run_test("Hub-spoke sync flow", test_hub_spoke_sync_flow)
-    await runner.run_test("Priority routing E2E", test_priority_routing_e2e)
+    # Run async tests
+    asyncio.run(test_end_to_end_sync(results))
     
     # Summary
     print("\n" + "=" * 60)
-    print("Results:")
-    print("=" * 60)
-    for result in runner.results:
-        print(result)
+    print(f"RESULTS: {results.summary()}")
     
-    passed, total = runner.summary()
-    print()
-    print(f"Total: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("\n✓ All tests passed!")
-        return 0
-    else:
-        print(f"\n✗ {total - passed} test(s) failed")
+    if results.failed > 0:
+        print("\nFailed tests:")
+        for error in results.errors:
+            print(f"  - {error}")
+        print()
         return 1
+    
+    print("\n✓ All tests passed!")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    exit(main())

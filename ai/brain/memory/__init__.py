@@ -1,46 +1,83 @@
+#!/usr/bin/env python3
 """
-DSMIL Brain Memory Module
+DSMIL Brain Memory Fabric
 
-Memory tier implementations with MEMSHADOW synchronization.
+Hierarchical memory system with three tiers:
+- L1 Working Memory: High-speed, hardware-adaptive scratchpad
+- L2 Episodic Memory: Session-based experiences with temporal indexing
+- L3 Semantic Memory: Long-term knowledge graph with concept relationships
 
-Tiers:
-- L1 Working Memory: Fast, limited capacity, RAMDISK
-- L2 Episodic Memory: Session/episode storage, NVMe
-- L3 Semantic Memory: Long-term knowledge, compressed
-
-Components:
-- MemorySyncProtocol: Sync items, batches, and manager
-- WorkingMemory: L1 tier implementation
-- EpisodicMemory: L2 tier implementation
-- SemanticMemory: L3 tier implementation
+Features:
+- Automatic hardware detection and memory sizing
+- Cross-tier consolidation and promotion
+- Distributed sync for multi-node operation
+- Forgetting curves with importance weighting
 """
 
-from .memory_sync_protocol import (
-    SyncConfig,
-    DEFAULT_CONFIG,
-    SyncPriority,
-    MemorySyncItem,
-    MemorySyncBatch,
-    SyncVector,
-    MemorySyncManager,
+from .working_memory import (
+    WorkingMemory,
+    WorkingMemoryItem,
+    AttentionWeight,
+    MemoryPressure,
 )
 
-from .working_memory import WorkingMemory
-from .episodic_memory import EpisodicMemory
-from .semantic_memory import SemanticMemory
+from .episodic_memory import (
+    EpisodicMemory,
+    Episode,
+    Event,
+    ExperienceReplay,
+)
 
+from .semantic_memory import (
+    SemanticMemory,
+    Concept,
+    Relationship,
+    KnowledgeGraph,
+)
+
+from .memory_consolidator import (
+    MemoryConsolidator,
+    ConsolidationPolicy,
+    PromotionCriteria,
+)
+
+from .memory_sync_protocol import (
+    MemorySyncManager,
+    MemorySyncBatch,
+    MemorySyncItem,
+    MemoryTier,
+    SyncOperation,
+    SyncPriority,
+    SyncFlags,
+)
 
 __all__ = [
-    # Sync protocol
-    "SyncConfig",
-    "DEFAULT_CONFIG",
-    "SyncPriority",
-    "MemorySyncItem",
-    "MemorySyncBatch",
-    "SyncVector",
-    "MemorySyncManager",
-    # Memory tiers
+    # Working Memory
     "WorkingMemory",
+    "WorkingMemoryItem",
+    "AttentionWeight",
+    "MemoryPressure",
+    # Episodic Memory
     "EpisodicMemory",
+    "Episode",
+    "Event",
+    "ExperienceReplay",
+    # Semantic Memory
     "SemanticMemory",
+    "Concept",
+    "Relationship",
+    "KnowledgeGraph",
+    # Consolidator
+    "MemoryConsolidator",
+    "ConsolidationPolicy",
+    "PromotionCriteria",
+    # Sync Protocol (MEMSHADOW v2)
+    "MemorySyncManager",
+    "MemorySyncBatch",
+    "MemorySyncItem",
+    "MemoryTier",
+    "SyncOperation",
+    "SyncPriority",
+    "SyncFlags",
 ]
+

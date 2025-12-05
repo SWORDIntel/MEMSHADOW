@@ -7,22 +7,12 @@ This is the canonical protocol library referenced by:
 - ai/brain/federation/hub_orchestrator.py
 - ai/brain/federation/spoke_client.py
 - ai/brain/memory/memory_sync_protocol.py
+- ai/brain/plugins/ingest/memshadow_ingest.py
 - external/intel/shrink/shrink/kernel_receiver.py
 
 Protocol Version: 2.0
 Header Size: 32 bytes
 Magic Number: 0x4D534857 ("MSHW" in ASCII)
-
-Usage:
-    from dsmil_protocol import MemshadowHeader, MessageType, Priority, MessageFlags
-    
-    header = MemshadowHeader(
-        priority=Priority.NORMAL,
-        msg_type=MessageType.MEMORY_SYNC,
-        payload_len=1024
-    )
-    packed = header.pack()
-    unpacked = MemshadowHeader.unpack(packed)
 """
 
 import struct
@@ -30,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum, IntFlag
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # ============================================================================
 # Protocol Constants
@@ -39,10 +29,11 @@ from typing import Any, Dict, Optional, Tuple
 MEMSHADOW_MAGIC = 0x4D534857  # "MSHW" in ASCII
 MEMSHADOW_VERSION = 2
 HEADER_SIZE = 32
+PSYCH_EVENT_SIZE = 64
 
 
 # ============================================================================
-# Enumerations (match HUB_DOCS/MEMSHADOW PROTOCOL.md exactly)
+# Enumerations
 # ============================================================================
 
 class MessageType(IntEnum):
@@ -51,7 +42,8 @@ class MessageType(IntEnum):
     # System/Control (0x00xx)
     HEARTBEAT = 0x0001
     ACK = 0x0002
-    ERROR = 0x0003
+    NACK = 0x0003
+    ERROR = 0x0003  # Alias for NACK
     HANDSHAKE = 0x0004
     DISCONNECT = 0x0005
     
@@ -62,6 +54,8 @@ class MessageType(IntEnum):
     NEURO_UPDATE = 0x0103
     TMI_UPDATE = 0x0104
     COGARCH_UPDATE = 0x0105
+    COGNITIVE_UPDATE = 0x0105  # Alias
+    FULL_PSYCH = 0x0106
     PSYCH_THREAT_ALERT = 0x0110
     PSYCH_ANOMALY = 0x0111
     PSYCH_RISK_THRESHOLD = 0x0112
@@ -70,19 +64,22 @@ class MessageType(IntEnum):
     THREAT_REPORT = 0x0201
     INTEL_REPORT = 0x0202
     KNOWLEDGE_UPDATE = 0x0203
+    BRAIN_INTEL_REPORT = 0x0204
+    INTEL_PROPAGATE = 0x0205
     
     # Memory Operations (0x03xx)
     MEMORY_STORE = 0x0301
     MEMORY_QUERY = 0x0302
     MEMORY_RESPONSE = 0x0303
     MEMORY_SYNC = 0x0304
+    VECTOR_SYNC = 0x0305
     
     # Federation/Mesh (0x04xx)
     NODE_REGISTER = 0x0401
     NODE_DEREGISTER = 0x0402
     QUERY_DISTRIBUTE = 0x0403
+    BRAIN_QUERY = 0x0403  # Alias
     QUERY_RESPONSE = 0x0404
-    INTEL_PROPAGATE = 0x0405
     
     # Self-Improvement (0x05xx)
     IMPROVEMENT_ANNOUNCE = 0x0501
@@ -91,6 +88,10 @@ class MessageType(IntEnum):
     IMPROVEMENT_ACK = 0x0504
     IMPROVEMENT_REJECT = 0x0505
     IMPROVEMENT_METRICS = 0x0506
+
+
+# Alias for backward compatibility
+MemshadowMessageType = MessageType
 
 
 class Priority(IntEnum):
@@ -110,7 +111,7 @@ class Priority(IntEnum):
     CRITICAL = 3
     EMERGENCY = 4
     
-    # Aliases for sync operations (map to standard levels)
+    # Aliases for sync operations
     BACKGROUND = 0
     URGENT = 4
     
@@ -127,18 +128,22 @@ class Priority(IntEnum):
         return self < Priority.CRITICAL
 
 
+# Alias for backward compatibility
+MemshadowMessagePriority = Priority
+
+
 class MessageFlags(IntFlag):
     """Message flags for payload handling"""
     NONE = 0x0000
-    ENCRYPTED = 0x0001       # Payload is encrypted
-    COMPRESSED = 0x0002      # Payload is compressed
-    BATCHED = 0x0004         # Contains multiple items
-    REQUIRES_ACK = 0x0008    # Requires acknowledgment
-    FRAGMENTED = 0x0010      # Message is fragmented
-    LAST_FRAGMENT = 0x0020   # Last fragment in sequence
-    FROM_KERNEL = 0x0040     # Originated from kernel module
-    HIGH_CONFIDENCE = 0x0080 # High confidence in data
-    PQC_SIGNED = 0x0100      # Post-quantum cryptography signed
+    ENCRYPTED = 0x0001
+    COMPRESSED = 0x0002
+    BATCHED = 0x0004
+    REQUIRES_ACK = 0x0008
+    FRAGMENTED = 0x0010
+    LAST_FRAGMENT = 0x0020
+    FROM_KERNEL = 0x0040
+    HIGH_CONFIDENCE = 0x0080
+    PQC_SIGNED = 0x0100
 
 
 class SyncOperation(IntEnum):
@@ -152,11 +157,9 @@ class SyncOperation(IntEnum):
 
 class MemoryTier(IntEnum):
     """Memory tier levels"""
-    WORKING = 1    # L1 - Hot working memory
-    EPISODIC = 2   # L2 - Episodic/session memory
-    SEMANTIC = 3   # L3 - Long-term semantic memory
-    
-    # Aliases
+    WORKING = 1
+    EPISODIC = 2
+    SEMANTIC = 3
     L1 = 1
     L2 = 2
     L3 = 3
@@ -176,8 +179,7 @@ class MemshadowHeader:
         version       : 2 bytes - Protocol version (2)
         priority      : 2 bytes - Message priority (0-4)
         msg_type      : 2 bytes - Message type
-        flags         : 2 bytes - Message flags
-        batch_count   : 2 bytes - Number of items in batch (0=single)
+        flags_batch   : 2 bytes - Flags (low byte) + batch_count (high byte)
         payload_len   : 8 bytes - Payload length in bytes
         timestamp_ns  : 8 bytes - Nanosecond timestamp
     
@@ -191,14 +193,21 @@ class MemshadowHeader:
     batch_count: int = 0
     payload_len: int = 0
     timestamp_ns: int = field(default_factory=lambda: int(time.time() * 1e9))
+    sequence_num: int = 0  # Optional sequence number (embedded in flags_batch)
     
-    # Format: Q(8) + H(2)*4 + Q(8) + Q(8) = 32 bytes
-    # magic(8) + version(2) + priority(2) + msg_type(2) + flags_batch(2) + payload_len(8) + timestamp_ns(8)
     _FORMAT = ">QHHHHQQ"
+    
+    # Aliases for backward compatibility
+    @property
+    def message_type(self) -> MessageType:
+        return self.msg_type
+    
+    @message_type.setter
+    def message_type(self, value: MessageType):
+        self.msg_type = value
     
     def pack(self) -> bytes:
         """Pack header to binary (32 bytes, network byte order)"""
-        # Combine flags (low byte) and batch_count (high byte) into single uint16
         flags_batch = (int(self.flags) & 0xFF) | ((self.batch_count & 0xFF) << 8)
         
         return struct.pack(
@@ -256,48 +265,6 @@ class MemshadowHeader:
 
 
 # ============================================================================
-# Message Container
-# ============================================================================
-
-@dataclass
-class MemshadowMessage:
-    """Complete MEMSHADOW message with header and payload"""
-    header: MemshadowHeader
-    payload: bytes = b""
-    
-    def pack(self) -> bytes:
-        """Pack complete message to binary"""
-        self.header.payload_len = len(self.payload)
-        return self.header.pack() + self.payload
-    
-    @classmethod
-    def unpack(cls, data: bytes) -> "MemshadowMessage":
-        """Unpack complete message from binary"""
-        header = MemshadowHeader.unpack(data[:HEADER_SIZE])
-        payload = data[HEADER_SIZE:HEADER_SIZE + header.payload_len]
-        return cls(header=header, payload=payload)
-    
-    @classmethod
-    def create(
-        cls,
-        msg_type: MessageType,
-        payload: bytes,
-        priority: Priority = Priority.NORMAL,
-        flags: MessageFlags = MessageFlags.NONE,
-        batch_count: int = 0,
-    ) -> "MemshadowMessage":
-        """Create a new MEMSHADOW message"""
-        header = MemshadowHeader(
-            msg_type=msg_type,
-            priority=priority,
-            flags=flags,
-            batch_count=batch_count,
-            payload_len=len(payload),
-        )
-        return cls(header=header, payload=payload)
-
-
-# ============================================================================
 # SHRINK Psychological Event Structure (64 bytes)
 # ============================================================================
 
@@ -322,8 +289,12 @@ class PsychEvent:
     espionage_exposure: float = 0.0
     confidence: float = 0.0
     
-    # Format: Q(8) + I(4) + B(1) + B(1) + H(2) + Q(8) + 7*f(28) + 12x(12) = 64 bytes
     _FORMAT = ">QIBBHQfffffff12x"
+    
+    @property
+    def dark_triad_average(self) -> float:
+        """Calculate average dark triad score"""
+        return (self.machiavellianism + self.narcissism + self.psychopathy) / 3.0
     
     def pack(self) -> bytes:
         """Pack to binary (64 bytes)"""
@@ -347,7 +318,7 @@ class PsychEvent:
     @classmethod
     def unpack(cls, data: bytes) -> "PsychEvent":
         """Unpack from binary (64 bytes)"""
-        if len(data) < 64:
+        if len(data) < PSYCH_EVENT_SIZE:
             raise ValueError(f"PsychEvent too short: {len(data)} bytes")
         
         (
@@ -364,7 +335,7 @@ class PsychEvent:
             burnout_probability,
             espionage_exposure,
             confidence,
-        ) = struct.unpack(cls._FORMAT, data[:64])
+        ) = struct.unpack(cls._FORMAT, data[:PSYCH_EVENT_SIZE])
         
         return cls(
             session_id=session_id,
@@ -394,8 +365,103 @@ class PsychEventType(IntEnum):
 
 
 # ============================================================================
-# Routing Helpers
+# Message Container
 # ============================================================================
+
+@dataclass
+class MemshadowMessage:
+    """Complete MEMSHADOW message with header and payload"""
+    header: MemshadowHeader
+    payload: bytes = b""
+    events: List[PsychEvent] = field(default_factory=list)
+    
+    @property
+    def raw_payload(self) -> bytes:
+        """Alias for payload"""
+        return self.payload
+    
+    def pack(self) -> bytes:
+        """Pack complete message to binary"""
+        self.header.payload_len = len(self.payload)
+        return self.header.pack() + self.payload
+    
+    @classmethod
+    def unpack(cls, data: bytes) -> "MemshadowMessage":
+        """Unpack complete message from binary"""
+        header = MemshadowHeader.unpack(data[:HEADER_SIZE])
+        payload = data[HEADER_SIZE:HEADER_SIZE + header.payload_len]
+        
+        # Parse psych events if this is a psych message type
+        events = []
+        if header.msg_type in (
+            MessageType.PSYCH_ASSESSMENT,
+            MessageType.DARK_TRIAD_UPDATE,
+            MessageType.RISK_UPDATE,
+            MessageType.NEURO_UPDATE,
+            MessageType.TMI_UPDATE,
+            MessageType.COGNITIVE_UPDATE,
+            MessageType.FULL_PSYCH,
+        ):
+            offset = 0
+            while offset + PSYCH_EVENT_SIZE <= len(payload):
+                try:
+                    event = PsychEvent.unpack(payload[offset:])
+                    events.append(event)
+                    offset += PSYCH_EVENT_SIZE
+                except:
+                    break
+        
+        return cls(header=header, payload=payload, events=events)
+    
+    @classmethod
+    def create(
+        cls,
+        msg_type: MessageType,
+        payload: bytes,
+        priority: Priority = Priority.NORMAL,
+        flags: MessageFlags = MessageFlags.NONE,
+        batch_count: int = 0,
+    ) -> "MemshadowMessage":
+        """Create a new MEMSHADOW message"""
+        header = MemshadowHeader(
+            msg_type=msg_type,
+            priority=priority,
+            flags=flags,
+            batch_count=batch_count,
+            payload_len=len(payload),
+        )
+        return cls(header=header, payload=payload)
+
+
+# ============================================================================
+# Protocol Detection and Helpers
+# ============================================================================
+
+def detect_protocol_version(data: bytes) -> int:
+    """
+    Detect MEMSHADOW protocol version from raw data.
+    
+    Returns:
+        Protocol version (1 or 2), or 0 if not MEMSHADOW protocol
+    """
+    if len(data) < 8:
+        return 0
+    
+    # Check for v2 magic (8 bytes)
+    magic = struct.unpack(">Q", data[:8])[0]
+    if magic == MEMSHADOW_MAGIC:
+        if len(data) >= 10:
+            version = struct.unpack(">H", data[8:10])[0]
+            return version
+        return 2
+    
+    # Check for v1 magic (4 bytes)
+    magic4 = struct.unpack(">I", data[:4])[0]
+    if magic4 == 0x4D534857:  # MSHW in 4 bytes
+        return 1
+    
+    return 0
+
 
 def should_route_p2p(priority: Priority) -> bool:
     """
@@ -444,7 +510,7 @@ def create_memory_sync_message(
 
 
 def create_psych_message(
-    events: list,
+    events: List[PsychEvent],
     priority: Priority = Priority.NORMAL,
 ) -> MemshadowMessage:
     """Create a PSYCH_ASSESSMENT message with batched events"""
@@ -489,9 +555,12 @@ __all__ = [
     "MEMSHADOW_MAGIC",
     "MEMSHADOW_VERSION",
     "HEADER_SIZE",
+    "PSYCH_EVENT_SIZE",
     # Enums
     "MessageType",
+    "MemshadowMessageType",  # Alias
     "Priority",
+    "MemshadowMessagePriority",  # Alias
     "MessageFlags",
     "SyncOperation",
     "MemoryTier",
@@ -501,6 +570,7 @@ __all__ = [
     "MemshadowMessage",
     "PsychEvent",
     # Helpers
+    "detect_protocol_version",
     "should_route_p2p",
     "get_routing_mode",
     "create_memory_sync_message",
