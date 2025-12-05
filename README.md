@@ -606,9 +606,9 @@ docker-compose down
 ## Documentation
 
 ### Getting Started
-* [Quick Start Guide](docs/QUICK_START.md) - Get started in 5 minutes
-* [Quick Start (Alternative)](docs/QUICKSTART.md) - Alternative quick start guide
-* [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) - Complete deployment instructions
+* [Getting Started Guide](docs/getting-started/GETTING_STARTED.md) - Quick start for new users (5 minutes)
+* [Deployment Guide](docs/guides/DEPLOYMENT.md) - Complete deployment instructions
+* [Production Deployment](docs/guides/PRODUCTION_DEPLOYMENT.md) - Production setup guide
 * [Production Security](docs/PRODUCTION_SECURITY.md) - Security best practices and hardening
 * [API Documentation](http://localhost:8000/api/docs) - Interactive OpenAPI docs (when running)
 

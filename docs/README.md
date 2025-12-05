@@ -2,12 +2,16 @@
 
 This directory contains all documentation for the MEMSHADOW project. Documentation is organized into logical sections for easy navigation.
 
-## Quick Start Guides
+## Getting Started
 
-- **[QUICK_START.md](QUICK_START.md)** - Simple 5-minute quick start guide
-- **[QUICKSTART.md](QUICKSTART.md)** - Comprehensive quick start with troubleshooting
-- **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Complete deployment instructions
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Deployment procedures and configurations
+- **[GETTING_STARTED.md](getting-started/GETTING_STARTED.md)** - Quick start guide for new users (5 minutes)
+- **[Getting Started Archive](getting-started/)** - Additional quick start resources
+
+## Deployment Guides
+
+- **[DEPLOYMENT.md](guides/DEPLOYMENT.md)** - Complete deployment guide
+- **[PRODUCTION_DEPLOYMENT.md](guides/PRODUCTION_DEPLOYMENT.md)** - Production deployment instructions
+- **[DSMILSYSTEM_DEPLOYMENT.md](DSMILSYSTEM_DEPLOYMENT.md)** - DSMILSYSTEM subsystem deployment
 
 ## Architecture & Design
 
