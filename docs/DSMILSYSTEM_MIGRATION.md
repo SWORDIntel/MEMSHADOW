@@ -1,14 +1,16 @@
-# MEMSHADOW → DSMILSYSTEM Migration Guide
+# MEMSHADOW → DSMILSYSTEM Deployment Guide
 
 **Date:** 2025-01-XX  
-**Status:** Migration Guide  
+**Status:** Pre-Deployment Setup  
 **Version:** 1.0
 
 ---
 
 ## Overview
 
-This guide explains how to migrate from the legacy MEMSHADOW API to the new DSMILSYSTEM-aligned memory subsystem. The migration maintains backward compatibility through adapters while enabling new DSMILSYSTEM features.
+This guide explains how to deploy MEMSHADOW with DSMILSYSTEM-aligned memory subsystem. This is a **pre-deployment** setup - **no existing database to migrate**. The system supports both legacy and DSMILSYSTEM APIs simultaneously using separate tables.
+
+**For detailed deployment steps, see:** `docs/DSMILSYSTEM_DEPLOYMENT.md`
 
 ---
 
@@ -27,111 +29,44 @@ This guide explains how to migrate from the legacy MEMSHADOW API to the new DSMI
 ### Backward Compatibility
 
 - Legacy APIs continue to work via adapters
-- Default mappings: layer=6, device=0, clearance="UNCLASSIFIED"
-- Existing data automatically migrated with defaults
-- Gradual migration path available
+- Legacy APIs use `memories` table (separate from DSMILSYSTEM)
+- DSMILSYSTEM APIs use `memories_dsmil` table
+- Both systems can coexist independently
 
 ---
 
-## Migration Steps
+## Deployment Steps
 
-### 1. Database Migration
+### 1. Database Schema Creation
 
-Run the Alembic migration to add new columns:
+This is a **pre-deployment** setup - no existing database to migrate. Run Alembic to create the schema:
 
 ```bash
-# Create migration
-alembic revision --autogenerate -m "Add DSMILSYSTEM columns"
-
-# Review migration file
-# Edit migrations/versions/XXX_add_dsmilsystem_columns.py
-
-# Apply migration
+# Apply all migrations (creates fresh schema)
 alembic upgrade head
 ```
 
-**Migration Script** (`migrations/versions/XXX_add_dsmilsystem_columns.py`):
+**Migration File:** `migrations/versions/f1g2h3i4j5k6_add_dsmilsystem_memory_schema.py`
 
-```python
-"""Add DSMILSYSTEM columns
+This migration creates:
+- `memories_dsmil` table with DSMILSYSTEM semantics
+- All required indexes and constraints
+- Enum types for memory tiers
 
-Revision ID: xxxxx
-Revises: yyyyy
-Create Date: 2025-01-XX
-"""
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+**Note:** The DSMILSYSTEM memory table (`memories_dsmil`) is separate from the legacy `memories` table. Both can coexist:
+- Legacy APIs use `memories` table (via adapter)
+- DSMILSYSTEM APIs use `memories_dsmil` table
 
-# revision identifiers
-revision = 'xxxxx'
-down_revision = 'yyyyy'
-branch_labels = None
-depends_on = None
+### 2. Embedding Dimension
 
-def upgrade():
-    # Add new columns to memories table
-    op.add_column('memories', sa.Column('layer_id', sa.Integer(), nullable=True))
-    op.add_column('memories', sa.Column('device_id', sa.Integer(), nullable=True))
-    op.add_column('memories', sa.Column('clearance_token', sa.String(128), nullable=True))
-    op.add_column('memories', sa.Column('correlation_id', sa.String(128), nullable=True))
-    op.add_column('memories', sa.Column('roe_metadata', postgresql.JSONB(), nullable=True))
-    op.add_column('memories', sa.Column('tier', sa.String(20), nullable=True))
-    
-    # Set defaults for existing records
-    op.execute("UPDATE memories SET layer_id = 6 WHERE layer_id IS NULL")
-    op.execute("UPDATE memories SET device_id = 0 WHERE device_id IS NULL")
-    op.execute("UPDATE memories SET clearance_token = 'UNCLASSIFIED' WHERE clearance_token IS NULL")
-    op.execute("UPDATE memories SET roe_metadata = '{}' WHERE roe_metadata IS NULL")
-    op.execute("UPDATE memories SET tier = 'cold' WHERE tier IS NULL")
-    
-    # Make columns non-nullable
-    op.alter_column('memories', 'layer_id', nullable=False)
-    op.alter_column('memories', 'device_id', nullable=False)
-    op.alter_column('memories', 'clearance_token', nullable=False)
-    op.alter_column('memories', 'roe_metadata', nullable=False)
-    op.alter_column('memories', 'tier', nullable=False)
-    
-    # Add indexes
-    op.create_index('idx_layer_device', 'memories', ['layer_id', 'device_id'])
-    op.create_index('idx_clearance_token', 'memories', ['clearance_token'])
-    op.create_index('idx_correlation_id', 'memories', ['correlation_id'])
-    op.create_index('idx_tier', 'memories', ['tier'])
-    
-    # Add check constraints
-    op.create_check_constraint('check_layer_range', 'memories', 'layer_id >= 2 AND layer_id <= 9')
-    op.create_check_constraint('check_device_range', 'memories', 'device_id >= 0 AND device_id <= 103')
-
-def downgrade():
-    # Remove indexes
-    op.drop_index('idx_tier', 'memories')
-    op.drop_index('idx_correlation_id', 'memories')
-    op.drop_index('idx_clearance_token', 'memories')
-    op.drop_index('idx_layer_device', 'memories')
-    
-    # Remove check constraints
-    op.drop_constraint('check_device_range', 'memories')
-    op.drop_constraint('check_layer_range', 'memories')
-    
-    # Remove columns
-    op.drop_column('memories', 'tier')
-    op.drop_column('memories', 'roe_metadata')
-    op.drop_column('memories', 'correlation_id')
-    op.drop_column('memories', 'clearance_token')
-    op.drop_column('memories', 'device_id')
-    op.drop_column('memories', 'layer_id')
-```
-
-### 2. Update Embedding Dimension
-
-Update embedding dimension from 768d to 2048d:
+The DSMILSYSTEM schema uses 2048-dimensional embeddings by default:
 
 ```python
 # In app/models/memory_dsmil.py
-embedding = Column(Vector(2048))  # Changed from 768
+embedding = Column(Vector(2048))  # 2048d INT8 quantized
 ```
 
-**Note:** Existing embeddings will need to be regenerated or projected to 2048d.
+**Note:** The embedding service supports projection to 2048d from smaller models.
 
 ### 3. Configure SQLite Warm Tier
 
@@ -260,7 +195,7 @@ pytest tests/integration/test_dsmil_upward_only.py -v
 
 ## Rollback Plan
 
-If issues occur, rollback steps:
+If issues occur during deployment:
 
 1. **Disable DSMILSYSTEM API:**
    ```bash
@@ -273,9 +208,9 @@ If issues occur, rollback steps:
    ```
 
 3. **Use legacy APIs only:**
-   - All legacy APIs continue to work
-   - No data loss
-   - Gradual re-migration possible
+   - Legacy APIs use separate `memories` table
+   - No impact on DSMILSYSTEM `memories_dsmil` table
+   - Can re-enable DSMILSYSTEM when ready
 
 ---
 

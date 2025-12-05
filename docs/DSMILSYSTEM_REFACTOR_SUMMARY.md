@@ -262,15 +262,14 @@ DSMILSYSTEM_DEFAULT_DEVICE=0
 DSMILSYSTEM_DEFAULT_CLEARANCE=UNCLASSIFIED
 ```
 
-### Database Migration
+### Database Schema Creation
 
 ```bash
-# Create migration
-alembic revision --autogenerate -m "Add DSMILSYSTEM columns"
-
-# Apply migration
+# Apply migrations (creates fresh schema - pre-deployment)
 alembic upgrade head
 ```
+
+**Note:** This is pre-deployment - no existing database to migrate. The migration creates the `memories_dsmil` table alongside the existing `memories` table.
 
 ---
 
