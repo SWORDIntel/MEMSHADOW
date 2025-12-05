@@ -1,110 +1,78 @@
 #!/usr/bin/env python3
-"""
-TGcollector Intel Ingest Endpoint for DSMIL Brain
+"""TGcollector Intel Ingest Endpoint for DSMIL Brain."""
 
-Accepts MEMSHADOW binary INTEL_REPORT messages from TGcollector and routes them
-through the existing memshadow ingest plugin into the Brain memory tiers.
-"""
+from __future__ import annotations
 
+import json
 import logging
-import sys
-from pathlib import Path
-from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from typing import Any, Dict, List
 
-brain_path = Path(__file__).parent.parent
-if str(brain_path) not in sys.path:
-    sys.path.insert(0, str(brain_path))
-
-try:
-    from plugins.ingest.memshadow_ingest import MemshadowIngestPlugin
-    from plugins.ingest_framework import IngestPluginManager
-    INGEST_AVAILABLE = True
-except ImportError:
-    INGEST_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("Ingest framework not available")
+from config.memshadow_config import get_memshadow_config
+from ..metrics.memshadow_metrics import get_memshadow_metrics_registry
+from ..plugins.ingest.tgcollector_ingest import TGCollectorIngestor
 
 logger = logging.getLogger(__name__)
 
 
 class TGcollectorEndpoint:
-    """Binary ingest endpoint for TGcollector intel."""
+    """Normalize TGcollector INTEL_* payloads into MEMSHADOW."""
 
-    def __init__(self, brain_interface=None, ingest_manager: Optional[Any] = None):
+    def __init__(self, brain_interface=None):
         self.brain_interface = brain_interface
-        self.ingest_manager = ingest_manager
-        if INGEST_AVAILABLE and ingest_manager is None:
-            try:
-                self.ingest_manager = IngestPluginManager()
-                self.ingest_manager.load_plugin("memshadow_ingest", {"enabled": True})
-            except Exception as exc:
-                logger.warning(f"Could not initialize ingest manager: {exc}")
-        logger.info("TGcollectorEndpoint initialized")
+        self._config = get_memshadow_config()
+        self._metrics = get_memshadow_metrics_registry()
+        self._ingestor = TGCollectorIngestor(brain_interface)
 
-    def handle_post(self, request_data: bytes, content_type: str = "application/octet-stream") -> Dict[str, Any]:
-        """Handle POST with MEMSHADOW binary payload."""
+    def handle_post(self, request_data: bytes, content_type: str = "application/json") -> Dict[str, Any]:
+        if not request_data:
+            return self._failure_response("Empty payload")
+
         try:
-            if content_type == "application/octet-stream" or content_type.startswith("application/x-"):
-                return self._handle_binary_ingest(request_data)
-            else:
-                return self._handle_binary_ingest(request_data)
-        except Exception as exc:  # pragma: no cover - runtime only
-            logger.error("tgcollector ingest error: %s", exc, exc_info=True)
-            return {"success": False, "error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat()}
-
-    def _handle_binary_ingest(self, data: bytes) -> Dict[str, Any]:
-        if not self.ingest_manager:
-            return {"success": False, "error": "Ingest manager not available"}
-        plugin = self.ingest_manager.get_plugin("memshadow_ingest")
-        if not plugin:
-            return {"success": False, "error": "MEMSHADOW ingest plugin not loaded"}
-
-        result = plugin.ingest(data)
-        if result.success:
-            if self.brain_interface and result.data:
-                for item in result.data:
-                    self._store_intel(item)
+            data = json.loads(request_data.decode() or "{}")
+            if isinstance(data, dict) and "records" in data:
+                data = data["records"]
+            payloads: List[Dict[str, Any]] = data if isinstance(data, list) else [data]
+            records = self._ingestor.ingest(payloads, source="tgcollector")
+            summary = self._summarize_records(records)
             return {
                 "success": True,
-                "items_ingested": result.items_ingested,
-                "bytes_processed": result.bytes_processed,
-                "messages_parsed": result.metadata.get("messages_parsed", 0),
+                "records_ingested": summary,
+                "record_count": sum(summary.values()),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-        return {"success": False, "errors": result.errors, "timestamp": datetime.now(timezone.utc).isoformat()}
+        except json.JSONDecodeError as exc:
+            logger.warning("TGcollector ingest JSON parse error: %s", exc)
+            return self._failure_response("Invalid JSON payload")
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            logger.error("Unexpected TGcollector ingest failure: %s", exc, exc_info=True)
+            return self._failure_response("Internal server error")
 
-    def _store_intel(self, item: Dict[str, Any]) -> None:
-        """Persist intel into brain memories."""
-        if not self.brain_interface:
-            return
-        try:
-            # Default: store in semantic memory
-            if hasattr(self.brain_interface, "semantic_memory"):
-                self.brain_interface.semantic_memory.store(
-                    concept=item.get("source", "tgcollector"),
-                    knowledge=item,
-                    domain="tgcollector",
-                )
-            if hasattr(self.brain_interface, "episodic_memory"):
-                self.brain_interface.episodic_memory.store(
-                    event=item,
-                    context={"source": "tgcollector"},
-                )
-        except Exception as exc:
-            logger.warning("Failed to store TGcollector intel: %s", exc)
+    def _failure_response(self, message: str) -> Dict[str, Any]:
+        return {
+            "success": False,
+            "error": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _summarize_records(self, records: List[Any]) -> Dict[str, int]:
+        summary: Dict[str, int] = {}
+        for record in records:
+            category = getattr(record, "category", "unknown")
+            summary[category] = summary.get(category, 0) + 1
+        return summary
 
 
-def create_fastapi_router(brain_interface=None, ingest_manager: Optional[Any] = None):
+def create_fastapi_router(brain_interface=None):
     """Return a FastAPI router for mounting into an API app."""
     from fastapi import APIRouter, Request
 
-    endpoint = TGcollectorEndpoint(brain_interface, ingest_manager)
+    endpoint = TGcollectorEndpoint(brain_interface)
     router = APIRouter()
 
     @router.post("/api/v1/ingest/tgcollector")
     async def ingest_tgcollector(request: Request):
         body = await request.body()
-        return endpoint.handle_post(body, request.headers.get("content-type", "application/octet-stream"))
+        return endpoint.handle_post(body, request.headers.get("content-type", "application/json"))
 
     return router

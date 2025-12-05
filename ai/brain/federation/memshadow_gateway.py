@@ -25,7 +25,11 @@ from collections import defaultdict
 import sys
 from pathlib import Path
 
+from config.memshadow_config import get_memshadow_config
+
 logger = logging.getLogger(__name__)
+_MEMSHADOW_CONFIG = get_memshadow_config()
+_MEMSHADOW_METRICS = get_memshadow_metrics_registry()
 
 # Import MEMSHADOW protocol
 try:
@@ -63,6 +67,8 @@ except ImportError:
     except ImportError:
         SYNC_PROTOCOL_AVAILABLE = False
         logger.warning("Memory sync protocol not available")
+
+from ..metrics.memshadow_metrics import get_memshadow_metrics_registry
 
 
 @dataclass
@@ -119,6 +125,8 @@ class HubMemshadowGateway:
         """
         self.hub_id = hub_id
         self.mesh_send = mesh_send
+        self._config = _MEMSHADOW_CONFIG
+        self._metrics = _MEMSHADOW_METRICS
         
         # Node registry
         self._nodes: Dict[str, NodeMemoryCapabilities] = {}
@@ -180,6 +188,12 @@ class HubMemshadowGateway:
         
         logger.info(f"Registered node {node_id} with tiers: {[t.name for t in memory_tiers.keys()]}")
         return node_caps
+
+    def register_node_memshadow_caps(self, node_id: str, tiers: Dict[MemoryTier, int], endpoint: str = "", capabilities: Optional[Dict] = None) -> NodeMemoryCapabilities:
+        """
+        Public wrapper matching spec terminology for registering MEMSHADOW capabilities.
+        """
+        return self.register_node(node_id, endpoint, tiers, capabilities)
     
     def unregister_node(self, node_id: str):
         """Remove a node from the registry"""
@@ -270,7 +284,8 @@ class HubMemshadowGateway:
         self._metrics["batches_routed"] += 1
         
         # Determine routing mode
-        use_p2p = should_route_p2p(priority) if PROTOCOL_AVAILABLE else priority.value >= 3
+        allow_p2p = self._config.enable_p2p_for_critical
+        use_p2p = allow_p2p and (should_route_p2p(priority) if PROTOCOL_AVAILABLE else priority.value >= Priority.CRITICAL.value)
         
         # Pack batch if needed
         batch_data = batch.pack()
@@ -283,10 +298,13 @@ class HubMemshadowGateway:
             target = batch.target_node
             if target and target in self._nodes:
                 try:
+                    send_start = time.time()
                     if self.mesh_send:
                         await self.mesh_send(target, batch_data)
                     results[target] = True
                     logger.debug(f"P2P routed batch to {target}")
+                    _MEMSHADOW_METRICS.increment("memshadow_batches_sent")
+                    _MEMSHADOW_METRICS.observe_latency((time.time() - send_start) * 1000)
                 except Exception as e:
                     logger.error(f"P2P route failed to {target}: {e}")
                     results[target] = False
@@ -302,10 +320,13 @@ class HubMemshadowGateway:
             
             for node_id in target_nodes:
                 try:
+                    send_start = time.time()
                     if self.mesh_send:
                         await self.mesh_send(node_id, batch_data)
                     results[node_id] = True
                     logger.debug(f"Hub routed batch to {node_id}")
+                    _MEMSHADOW_METRICS.increment("memshadow_batches_sent")
+                    _MEMSHADOW_METRICS.observe_latency((time.time() - send_start) * 1000)
                 except Exception as e:
                     logger.error(f"Hub route failed to {node_id}: {e}")
                     results[node_id] = False
@@ -323,6 +344,33 @@ class HubMemshadowGateway:
             node_id for node_id, caps in self._nodes.items()
             if batch.tier in caps.tiers and node_id != batch.source_node
         ]
+
+    async def handle_memshadow_message(self, header: MemshadowHeader, payload: bytes, source_node: str) -> Dict[str, Any]:
+        """
+        Handle arbitrary MEMSHADOW messages routed to the hub.
+        """
+        if header.msg_type == MessageType.MEMORY_SYNC:
+            data = header.pack() + payload
+            return await self.handle_incoming_batch(data, source_node)
+
+        if header.msg_type == MessageType.MEMORY_STORE:
+            # Store requests trigger a follow-up sync to propagate to peers
+            self.schedule_sync(source_node, MemoryTier.WORKING, header.priority, reason="memory_store")
+            return {"status": "scheduled", "action": "memory_store"}
+
+        if header.msg_type == MessageType.MEMORY_QUERY:
+            self.schedule_sync(source_node, MemoryTier.WORKING, header.priority, reason="memory_query_response")
+            return {"status": "scheduled", "action": "memory_query"}
+
+        if header.msg_type in (
+            MessageType.IMPROVEMENT_ANNOUNCE,
+            MessageType.IMPROVEMENT_PAYLOAD,
+            MessageType.IMPROVEMENT_REQUEST,
+        ):
+            logger.debug("Improvement message routed via gateway: %s", header.msg_type.name)
+            return {"status": "ack", "action": "improvement_passthrough"}
+
+        return {"status": "ignored", "reason": f"unsupported_msg_type:{header.msg_type.name}"}
     
     async def handle_incoming_batch(self, data: bytes, source_node: str) -> Dict:
         """

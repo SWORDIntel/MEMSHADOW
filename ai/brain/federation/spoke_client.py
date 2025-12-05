@@ -24,6 +24,8 @@ from enum import Enum, auto
 from pathlib import Path
 import json
 
+from config.memshadow_config import get_memshadow_config
+
 logger = logging.getLogger(__name__)
 
 # Try to import dsmil-mesh library
@@ -53,6 +55,25 @@ try:
 except ImportError:
     IMPROVEMENT_AVAILABLE = False
     logger.debug("Improvement types not available")
+
+try:
+    protocol_path = Path(__file__).parent.parent.parent / "libs" / "memshadow-protocol" / "python"
+    if protocol_path.exists() and str(protocol_path) not in sys.path:
+        sys.path.insert(0, str(protocol_path))
+
+    from dsmil_protocol import Priority as MemshadowPriority
+    MEMSHADOW_PROTOCOL_AVAILABLE = True
+except ImportError:
+    MEMSHADOW_PROTOCOL_AVAILABLE = False
+    MemshadowPriority = None  # type: ignore
+
+try:
+    from .memshadow_gateway import SpokeMemoryAdapter
+    from ..memory.memory_sync_protocol import MemoryTier
+    MEMSHADOW_ADAPTER_AVAILABLE = True
+except ImportError:
+    MEMSHADOW_ADAPTER_AVAILABLE = False
+    logger.debug("SpokeMemoryAdapter not available")
 
 
 class SpokeState(Enum):
@@ -341,6 +362,14 @@ class SpokeClient:
             "mesh_enabled": self.use_mesh,
         }
 
+        self._memshadow_config = get_memshadow_config()
+        self._memshadow_enabled = MEMSHADOW_ADAPTER_AVAILABLE and self._memshadow_config.enable_shrink_ingest
+        self._memshadow_adapter: Optional[SpokeMemoryAdapter] = None
+        self._memshadow_tiers: Dict[MemoryTier, Any] = {}
+        if MEMSHADOW_ADAPTER_AVAILABLE:
+            hub_id = self.hub_endpoint or "hub"
+            self._memshadow_adapter = SpokeMemoryAdapter(self.node_id, hub_node_id=hub_id)
+
         logger.info(f"SpokeClient initialized: {node_id} (mesh={'enabled' if self.use_mesh else 'disabled'})")
 
     def _init_mesh(self):
@@ -384,6 +413,9 @@ class SpokeClient:
             logger.error(f"Failed to initialize mesh: {e}")
             self._mesh = None
             self.use_mesh = False
+        else:
+            if self._memshadow_adapter and self._mesh:
+                self._memshadow_adapter.mesh_send = self._mesh.send
 
     def _handle_mesh_query(self, data: bytes, peer_id: str):
         """Handle incoming query from mesh (from hub)"""
@@ -807,6 +839,36 @@ class SpokeClient:
         if domain not in self.data_domains:
             self.data_domains.add(domain)
 
+    def enable_memshadow_sync(self, enable: bool):
+        """Toggle participation in MEMSHADOW sync."""
+        self._memshadow_enabled = enable and MEMSHADOW_ADAPTER_AVAILABLE
+
+    def register_memshadow_tier(self, tier: Any, memory_instance: Any) -> bool:
+        """Register a local memory tier for MEMSHADOW sync."""
+        if not self._memshadow_adapter:
+            return False
+        if isinstance(tier, MemoryTier):
+            resolved_tier = tier
+        else:
+            try:
+                resolved_tier = MemoryTier[tier]
+            except Exception:
+                logger.warning("Unknown MemoryTier %s for MEMSHADOW registration", tier)
+                return False
+        self._memshadow_tiers[resolved_tier] = memory_instance
+        return self._memshadow_adapter.register_tier(resolved_tier, memory_instance)
+
+    async def sync_memshadow_tier(self, tier: MemoryTier, priority: Optional[Any] = None) -> Dict[str, Any]:
+        """Trigger a MEMSHADOW sync for a given tier."""
+        if not self._memshadow_enabled or not self._memshadow_adapter:
+            return {"status": "disabled"}
+        if not MEMSHADOW_PROTOCOL_AVAILABLE:
+            return {"status": "protocol_unavailable"}
+        priority = priority or (MemshadowPriority.NORMAL if MemshadowPriority else None)
+        if priority is None:
+            return {"status": "priority_unavailable"}
+        return await self._memshadow_adapter.sync_tier(tier, priority)
+
     def enter_autonomous_mode(self):
         """
         Enter autonomous operation mode
@@ -935,6 +997,13 @@ class SpokeClient:
 
     def get_status(self) -> Dict:
         """Get current status"""
+        memshadow_status = {
+            "enabled": self._memshadow_enabled,
+            "registered_tiers": [t.name for t in self._memshadow_tiers.keys()],
+        }
+        if self._memshadow_adapter:
+            memshadow_status["adapter"] = self._memshadow_adapter.get_stats()
+
         return {
             "node_id": self.node_id,
             "state": self.state.name,
@@ -945,6 +1014,7 @@ class SpokeClient:
             "peer_count": len(self._peers),
             "offline_queue_size": len(self._offline_queue),
             "stats": self.stats,
+            "memshadow": memshadow_status,
         }
 
     def get_capabilities_report(self) -> Dict:

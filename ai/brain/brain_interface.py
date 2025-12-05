@@ -300,7 +300,7 @@ class DSMILBrain:
         )
 
         if self.mode == BrainMode.HUB:
-            self._hub_orchestrator = HubOrchestrator(self.node_id)
+            self._hub_orchestrator = HubOrchestrator(self.node_id, brain_interface=self)
             self._hub_orchestrator.on_intel_received = self._handle_intel_from_node
             self._hub_orchestrator.start_health_monitoring()
 

@@ -26,7 +26,12 @@ from enum import IntEnum, IntFlag
 import sys
 from pathlib import Path
 
+from config.memshadow_config import get_memshadow_config
+from ..metrics.memshadow_metrics import get_memshadow_metrics_registry
+
 logger = logging.getLogger(__name__)
+_MEMSHADOW_CONFIG = get_memshadow_config()
+_MEMSHADOW_METRICS = get_memshadow_metrics_registry()
 
 # Try to import MEMSHADOW protocol
 try:
@@ -190,7 +195,7 @@ class MemorySyncBatch:
         items_data = b''.join(item.pack() for item in self.items)
 
         # Compress if large
-        if len(items_data) > 1024:
+        if len(items_data) > _MEMSHADOW_CONFIG.compression_threshold_bytes:
             items_data = gzip.compress(items_data)
             self.flags |= SyncFlags.COMPRESSED
 
@@ -293,6 +298,8 @@ class MemorySyncManager:
     def __init__(self, node_id: str, mesh=None):
         self.node_id = node_id
         self._mesh = mesh
+        self._config = _MEMSHADOW_CONFIG
+        self._metrics = _MEMSHADOW_METRICS
 
         # Sync state tracking
         self._sync_vectors: Dict[str, Dict[str, int]] = {}  # tier -> {node_id -> timestamp}
@@ -367,6 +374,14 @@ class MemorySyncManager:
         if not items:
             return None
 
+        if len(items) > self._config.max_batch_items:
+            logger.debug(
+                "Truncating delta batch from %d to %d items (config max)",
+                len(items),
+                self._config.max_batch_items,
+            )
+            items = items[: self._config.max_batch_items]
+
         batch = MemorySyncBatch(
             batch_id=hashlib.sha256(f"{self.node_id}-{time.time()}".encode()).hexdigest()[:16],
             source_node=self.node_id,
@@ -385,6 +400,7 @@ class MemorySyncManager:
 
         Returns: (items_applied, conflicts_detected)
         """
+        start_time = time.time()
         if batch.tier not in self._memory_tiers:
             logger.warning(f"Memory tier {batch.tier.name} not registered")
             return 0, 0
@@ -428,6 +444,12 @@ class MemorySyncManager:
 
         self.stats["items_synced"] += applied
         self.stats["batches_received"] += 1
+        self._metrics.increment("memshadow_batches_received")
+        if conflicts:
+            self._metrics.increment("memshadow_conflicts_detected", conflicts)
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        self._metrics.observe_latency(elapsed_ms)
 
         return applied, conflicts
 
@@ -511,6 +533,7 @@ class MemorySyncManager:
         """
         Perform full sync with a peer for given tier
         """
+        start_time = time.time()
         # Get last sync timestamp for this peer
         last_sync = self._sync_vectors.get(tier.name, {}).get(peer_id, 0)
 
@@ -527,6 +550,8 @@ class MemorySyncManager:
                 self._mesh.send(peer_id, MessageTypes.VECTOR_SYNC, batch.pack())
                 self.stats["batches_sent"] += 1
                 self.stats["bytes_transferred"] += len(batch.pack())
+                self._metrics.increment("memshadow_batches_sent")
+                self._metrics.observe_latency((time.time() - start_time) * 1000)
 
                 return {"status": "sent", "items": len(batch.items)}
             except Exception as e:
