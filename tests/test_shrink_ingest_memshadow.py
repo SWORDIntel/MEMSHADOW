@@ -89,11 +89,11 @@ def test_shrink_ingest_invalid_magic_returns_400():
 
 
 @pytest.mark.skipif(not PROTOCOL_AVAILABLE, reason="MEMSHADOW protocol not available")
-def test_shrink_ingest_rejects_non_psych_messages():
+def test_shrink_ingest_accepts_non_psych_messages():
     fake_brain = FakeBrain()
     endpoint = ShrinkIntelEndpoint(fake_brain)
 
-    # Build a MEMORY_SYNC message, which should be rejected by the ingest plugin
+    # Build a MEMORY_SYNC message, which should now be accepted as generic intel
     event = PsychEvent(session_id=1)
     message = create_psych_message([event])
     message.header.msg_type = MessageType.MEMORY_SYNC
@@ -101,5 +101,6 @@ def test_shrink_ingest_rejects_non_psych_messages():
 
     body, status = endpoint.handle_post(data, "application/octet-stream")
 
-    assert status == 400
-    assert not body["success"]
+    assert status == 200
+    assert body["success"]
+    assert body["items_ingested"] >= 1

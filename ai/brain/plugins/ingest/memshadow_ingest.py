@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MEMSHADOW Protocol ingest plugin focused on SHRINK PSYCH events."""
+"""MEMSHADOW Protocol ingest plugin for SHRINK and general intel streams."""
 
 from __future__ import annotations
 
@@ -55,6 +55,18 @@ PSYCH_MESSAGE_TYPES: Sequence[MessageType] = (
     MessageType.PSYCH_ANOMALY,
     MessageType.PSYCH_RISK_THRESHOLD,
 )
+
+ALL_MESSAGE_TYPES: Sequence[MessageType] = tuple(MessageType) if PROTOCOL_AVAILABLE else tuple()
+
+
+def _resolve_message_types(names: Sequence[str]) -> List[MessageType]:
+    resolved: List[MessageType] = []
+    for name in names:
+        try:
+            resolved.append(MessageType[name])
+        except KeyError:
+            logger.warning("Unknown MEMSHADOW message type '%s' in config", name)
+    return resolved
 
 
 @dataclass
@@ -188,14 +200,14 @@ class BrainMemoryFacade:
 
 
 class MemshadowIngestPlugin(IngestPlugin):
-    """Binary MEMSHADOW ingest plugin dedicated to SHRINK PSYCH payloads."""
+    """Binary MEMSHADOW ingest plugin dedicated to SHRINK and intel payloads."""
 
     def __init__(self, brain_interface: Any = None):
         self._config = get_memshadow_config()
         self._enabled = PROTOCOL_AVAILABLE and self._config.enable_shrink_ingest
         self._brain_interface = brain_interface
         self._metrics = get_memshadow_metrics_registry()
-        self._allowed_message_types = set(PSYCH_MESSAGE_TYPES)
+        self._allowed_message_types = set(ALL_MESSAGE_TYPES) if ALL_MESSAGE_TYPES else set()
 
     @property
     def name(self) -> str:
@@ -207,7 +219,7 @@ class MemshadowIngestPlugin(IngestPlugin):
 
     @property
     def description(self) -> str:
-        return "Parse and store MEMSHADOW PSYCH events from SHRINK receivers"
+        return "Parse and store MEMSHADOW events from SHRINK and intel sources"
 
     @property
     def supported_types(self) -> List[str]:
@@ -223,14 +235,9 @@ class MemshadowIngestPlugin(IngestPlugin):
         self._brain_interface = config.get("brain_interface", self._brain_interface)
         allowed = config.get("allowed_message_types")
         if allowed:
-            resolved = set()
-            for item in allowed:
-                try:
-                    resolved.add(MessageType[item])
-                except KeyError:
-                    continue
+            resolved = _resolve_message_types(allowed)
             if resolved:
-                self._allowed_message_types = resolved
+                self._allowed_message_types = set(resolved)
         return self._enabled
 
     # ------------------------------------------------------------------ Ingest
@@ -267,27 +274,29 @@ class MemshadowIngestPlugin(IngestPlugin):
             )
         try:
             messages = self._parse_messages(data)
-            records: List[PsychEventRecord] = []
-            for header, events in messages:
-                for idx, event in enumerate(events):
-                    records.append(self._build_record(header, event, idx))
-
             facade = BrainMemoryFacade(brain_interface or self._brain_interface)
-            facade.store_psych_events(records)
+            structured_records: List[Dict[str, Any]] = []
+            total_psych = 0
 
-            self._metrics.increment("memshadow_psych_events_ingested", len(records))
+            for header, events, payload in messages:
+                extracted, psych_count = self._extract_records(header, events, payload, facade)
+                structured_records.extend(extracted)
+                total_psych += psych_count
+
+            if total_psych:
+                self._metrics.increment("memshadow_psych_events_ingested", total_psych)
             self._metrics.increment("memshadow_batches_received", len(messages))
 
             return IngestResult(
                 success=True,
                 plugin_name=self.name,
-                data=[r.to_dict() for r in records],
+                data=structured_records,
                 metadata={
                     "messages_parsed": len(messages),
-                    "events_ingested": len(records),
+                    "events_ingested": total_psych,
                     "protocol_version": MEMSHADOW_VERSION,
                 },
-                items_ingested=len(records),
+                items_ingested=len(structured_records),
                 bytes_processed=len(data),
             )
         except ValueError as exc:
@@ -349,13 +358,15 @@ class MemshadowIngestPlugin(IngestPlugin):
             return source.read()
         return None
 
-    def _parse_messages(self, data: bytes) -> List[Tuple[MemshadowHeader, List[PsychEvent]]]:
-        messages: List[Tuple[MemshadowHeader, List[PsychEvent]]] = []
+    def _parse_messages(self, data: bytes) -> List[Tuple[MemshadowHeader, List[PsychEvent], bytes]]:
+        messages: List[Tuple[MemshadowHeader, List[PsychEvent], bytes]] = []
         offset = 0
         while offset + HEADER_SIZE <= len(data):
             header = MemshadowHeader.unpack(data[offset : offset + HEADER_SIZE])
-            if header.msg_type not in self._allowed_message_types:
-                raise ValueError(f"Unsupported msg_type: {header.msg_type.name}")
+            if self._allowed_message_types and header.msg_type not in self._allowed_message_types:
+                logger.debug("Skipping disallowed msg_type=%s", header.msg_type.name)
+                offset += HEADER_SIZE + header.payload_len
+                continue
 
             total_size = HEADER_SIZE + header.payload_len
             if offset + total_size > len(data):
@@ -366,9 +377,9 @@ class MemshadowIngestPlugin(IngestPlugin):
                 raise ValueError("Payload length mismatch")
 
             events = self._parse_psych_events(payload)
-            if not events:
+            if not events and header.msg_type in PSYCH_MESSAGE_TYPES:
                 logger.debug("No psych events decoded for msg_type=%s", header.msg_type.name)
-            messages.append((header, events))
+            messages.append((header, events, payload))
             offset += total_size
 
         if offset != len(data):
@@ -388,7 +399,29 @@ class MemshadowIngestPlugin(IngestPlugin):
             pos += PSYCH_EVENT_SIZE
         return events
 
-    def _build_record(
+    def _extract_records(
+        self,
+        header: MemshadowHeader,
+        events: List[PsychEvent],
+        payload: bytes,
+        facade: BrainMemoryFacade,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        records: List[Dict[str, Any]] = []
+        psych_count = 0
+
+        if header.msg_type in PSYCH_MESSAGE_TYPES and events:
+            psych_records: List[PsychEventRecord] = []
+            for idx, event in enumerate(events):
+                psych_records.append(self._build_psych_record(header, event, idx))
+            facade.store_psych_events(psych_records)
+            records.extend([r.to_dict() for r in psych_records])
+            psych_count = len(psych_records)
+        else:
+            records.append(self._build_generic_record(header, payload))
+
+        return records, psych_count
+
+    def _build_psych_record(
         self, header: MemshadowHeader, event: PsychEvent, batch_index: int
     ) -> PsychEventRecord:
         scores = {
@@ -415,6 +448,22 @@ class MemshadowIngestPlugin(IngestPlugin):
             dark_triad_average=event.dark_triad_average,
             confidence=event.confidence,
         )
+
+    def _build_generic_record(self, header: MemshadowHeader, payload: bytes) -> Dict[str, Any]:
+        parsed_payload: Any
+        try:
+            parsed_payload = json.loads(payload.decode())
+        except Exception:
+            parsed_payload = payload.hex()
+
+        return {
+            "message_type": header.msg_type.name,
+            "priority": header.priority.name if isinstance(header.priority, Priority) else header.priority,
+            "flags": int(header.flags) if isinstance(header.flags, MessageFlags) else int(header.flags or 0),
+            "payload_len": header.payload_len,
+            "timestamp_ns": header.timestamp_ns,
+            "payload": parsed_payload,
+        }
 
 
 # ---------------------------------------------------------------- convenience
